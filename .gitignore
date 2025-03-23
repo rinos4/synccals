@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# 個別ファイル
+config.yaml
+chrome_prof/*
+log/*
