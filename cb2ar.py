@@ -10,6 +10,7 @@
 ################################################################################
 import yaml
 import copy
+import re
 
 from logging import config, getLogger
 
@@ -137,25 +138,32 @@ def diff(conf, merge):
         if room not in conf['roomcheck']:
             room, person = person, room # 逆なら反転しておく
 
-        ids = '%s %s %s@%s@%s %s' % (item['tbgn'], item['tend'], person, room, sep[0], item['desc'][:MAX_DESC].rstrip())
+        # 比較文字列の作成。descはcompdesc設定に応じて変える
+        desc = item['desc'][:MAX_DESC].rstrip() if conf['compdesc'] else ''
+        ids = '%s %s %s@%s@%s %s' % (item['tbgn'], item['tend'], person, room, sep[0], desc)
         booked.add(ids)
         g_logger.debug('c2a:arr-ids %s' % (ids))
     booked = tuple(booked)# startswithで探せるようにタプルに変換しておく
             
     # 差分チェックして追加/削除が必要なものだけ返す
     deldesc = tuple(conf['deldesc'])
+    skipdesc = re.compile(conf['skipdesc'])
     ret = []
     for item in merge2:
         for summ in item['summ']:
             add = copy.deepcopy(item) | {'summ': summ, 'desc':normalize_text(item['desc'])}
             ids = '%s %s %s %s' % (add['tbgn'], add['tend'], add['summ'], add['desc'])
+            if skipdesc.match(add['desc']):
+                g_logger.debug('c2a:skip %s' % (ids))
+                continue
+
             if add['desc'].startswith(deldesc):
                 # 削除ーモード
                 g_logger.warning('c2a:Del not support %s' % (ids))
             else:
                 # 追加ーモード
                 if ids.startswith(booked): # AirリザーブはDESC後半40文字以上が入らないので前方一致で確認
-                    g_logger.debug('c2a:skip %s' % (ids))
+                    g_logger.debug('c2a:reg %s' % (ids))
                 else:
                     add['ctyp'] = '+' # 追加マーク
                     ret.append(add)

@@ -2,12 +2,15 @@
 Synchronize Calendars
 
 1. Install python
+% python
+or install from here:
 https://www.python.org/downloads/windows/
 
 2. Install modules
 Execute below from command prompt.
+% python -m pip install --upgrade pip
 % pip install selenium
-% pip install yaml
+% pip install pyyaml
 
 3. Change conf file
 @config.yaml to config.yaml
@@ -22,13 +25,15 @@ Execute below from command prompt.
 
 -------------------------------------------------------------------------------
 1. Pythonのインストール
+コマンドプロンプトからpythonと打つか、
 以下のサイトからWindows用のpythonをダウンロードしてインストールします。
 https://www.python.org/downloads/windows/
 
 2. Pythonモジュールのインストール
 コマンドプロンプトから以下を実行して必要なモジュールをインストールします。
+% python -m pip install --upgrade pip
 % pip install selenium
-% pip install yaml
+% pip install pyyaml
 
 3. 設定ファイルの変更
 「@config.yaml」ファイルをカスタマイズして、ファイル名を「config.yaml」に変更します。
@@ -39,4 +44,4 @@ https://www.python.org/downloads/windows/
 
 5. SyncCalsを実行します。
 コマンドプロンプトから以下を実行します。
-% python synccals.py
+% python main.py
