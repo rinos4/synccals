@@ -11,5 +11,8 @@ pip install yaml
 3. Change conf file
 config.yaml
 
-4. Start SyncCals
+4. Create log folder
+mkdir log
+
+5. Start SyncCals
 synccals.bat
