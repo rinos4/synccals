@@ -18,7 +18,7 @@ Execute below from command prompt.
 
 5. Start SyncCals
 Execute below from command prompt.
-% synccals.bat
+% python synccals.py
 
 -------------------------------------------------------------------------------
 1. Pythonのインストール
@@ -39,6 +39,4 @@ https://www.python.org/downloads/windows/
 
 5. SyncCalsを実行します。
 コマンドプロンプトから以下を実行します。
-% synccals.bat
-
-
+% python synccals.py
