@@ -13,7 +13,7 @@ import yaml
 import webctrl
 import re
 from datetime import datetime, timedelta
-from logging import config, getLogger
+from logconf import g_logger
 
 ################################################################################
 # const
@@ -32,23 +32,16 @@ WAIT_SEARCH = 1
 
 BTN_NEXTWEEK = -1 # 翌週ボタンはユニークIDがないためインデックスで指定(-1=最後のボタン)
 
-# ログ用ファイル
-LOG_CONF	= 'log.conf'
-LOG_KEY		= 'root'
-
 ################################################################################
 # globals
 ################################################################################
-# ロガー
-config.fileConfig(LOG_CONF)
-g_logger = getLogger(LOG_KEY)
 
 ################################################################################
 # util funcs
 ################################################################################
 # ログインページ処理
 def cb_login(conf):
-    g_logger.info('cyb:cb_login')
+    g_logger.debug('cyb:cb_login')
     # ユーザ/パスワード設定
     webctrl.set('username', conf['user'], webctrl.By.NAME)
     webctrl.set('password', conf['pass'], webctrl.By.NAME)
@@ -91,16 +84,18 @@ def get_cal(conf):
     # カレンダーから予定を抽出
     old = set() # 追加済みセット
     ret = []    # 関数から戻す配列
+    pre = 0     # カウント用
     # 抽出範囲
     today = datetime.now()
     daymin = today.replace(hour=0, minute=0, second=0, microsecond=0)
     daymax = daymin + timedelta(days=conf['range'])
-    g_logger.info('cyb:get %s to %s' % (daymin, daymax))
+    g_logger.debug('cyb:get %s to %s' % (daymin, daymax))
 
     # 登録された全グループの予定を順に抽出
     for group in conf['group']:
         webctrl.jump(URL_SEARCH % conf['serv']) # 日付を戻すためにグループ毎にトップカレンダーに移動
-        webctrl.selvalue('groupSelect', group['value'])
+        #webctrl.selvalue('groupSelect', group['value'])
+        webctrl.selindexvalue('groupSelect', group['name'])
         webctrl.wait() # ページ読み込み待ち
         time.sleep(WAIT_SEARCH) # グループ変更後の更新待ち
 
@@ -117,7 +112,7 @@ def get_cal(conf):
             # カレンダーのタイトルから年月日を抽出 (dt→0:年、1:月、2:日)
             title = re.split('[ 　年月日]+', webctrl.gets('dateheadInnerDateCellText', webctrl.By.CLASS_NAME)[1])
             start_dt = datetime(*[int(n) for n in title[:3]])
-            g_logger.info('cyb:week %s(%s): %s...' % (group['name'], group['value'], '/'.join(title[:3])))
+            g_logger.debug('cyb:week %s: %s...' % (group['name'], '/'.join(title[:3])))
             
             # グループ予定のアイテムをサーチ        
             for row in webctrl.find('eventrow', webctrl.By.CLASS_NAME):
@@ -204,6 +199,10 @@ def get_cal(conf):
                         else:
                             g_logger.debug('cyb:skip %s' % (sbook))
                             
+        # グループごとに取得した件数を表示しておく
+        g_logger.info('cyb:%-4s=%d件' % (group['name'], len(ret) - pre))
+        pre = len(ret)
+
     # 開放
     if not keep:
         webctrl.deinit()

@@ -177,3 +177,5 @@ cython_debug/
 config.yaml
 chrome_prof/*
 log/*
+start.bat
+*.bak

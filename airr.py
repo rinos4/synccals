@@ -13,7 +13,7 @@ import yaml
 import webctrl
 
 from datetime import datetime, timedelta
-from logging import config, getLogger
+from logconf import g_logger
 
 ################################################################################
 # const
@@ -33,17 +33,12 @@ WAIT_INPUT  = 2
 # 名前欄に入れられる最大文字列
 MAX_DESC    = 20
 
-# ログ用ファイル
-LOG_CONF	= 'log.conf'
-LOG_KEY		= 'root'
-
+# 検索のコラム数
+SEARCH_COLUMN = 8
 
 ################################################################################
 # globals
 ################################################################################
-# ロガー
-config.fileConfig(LOG_CONF)
-g_logger = getLogger(LOG_KEY)
 
 ################################################################################
 # util funcs
@@ -59,6 +54,33 @@ def ar_login(conf):
     webctrl.click('primary', webctrl.By.CLASS_NAME)
     webctrl.wait()
 
+# 事務所が違うなら変更
+def ar_checkgroup(group):
+    # 事務所情報を取得
+    menu = webctrl.find('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
+    if len(menu) < 2:
+        g_logger.error('arr:too small menu %s' % (len(menu)))
+        return 1
+
+    if group not in menu[1].text:
+        g_logger.debug('change:group from %s' % (menu[1].text))
+        menu[1].click()
+        webctrl.click('cmn-hdr-account-menu-link', webctrl.By.CLASS_NAME)
+        time.sleep(WAIT_AFTER)
+        webctrl.wait()
+        store = webctrl.find('storeList__list__innerBox', webctrl.By.CLASS_NAME)
+        for s in store:
+            if group in s.text:
+                s.click()
+                webctrl.wait()
+                break
+        else:
+            # 事務所が見つからなかった!?
+            g_logger.error('arr:store not found %s' % (group))
+            return 2
+
+    return 0 # 成功
+    
 ################################################################################
 # Plugin API
 ################################################################################
@@ -85,32 +107,12 @@ def get_cal(conf):
     # 応答値格納用
     old = set() # 追加済みセット
     ret = []    # 関数から戻す配列
+    pre = 0
 
     for group in conf['group']:
-        g_logger.info('arr:group %s' % (group))
         # 事務所確認
-        menu = webctrl.find('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
-        if len(menu) < 2:
-            g_logger.error('arr:too small menu %s' % (len(menu)))
-            continue
-
-        # 事務所が違うなら変更
-        if group not in menu[1].text:
-            g_logger.debug('change:group from %s' % (menu[1].text))
-            menu[1].click()
-            webctrl.click('cmn-hdr-account-menu-link', webctrl.By.CLASS_NAME)
-            time.sleep(WAIT_AFTER)
-            webctrl.wait()
-            store = webctrl.find('storeList__list__innerBox', webctrl.By.CLASS_NAME)
-            for s in store:
-                if group in s.text:
-                    s.click()
-                    webctrl.wait()
-                    break
-            else:
-                # 事務所が見つからなかった!?
-                g_logger.error('arr:store not found %s' % (group))
-                continue
+        g_logger.debug('arr:group %s' % (group))
+        ar_checkgroup(group)
         
         # 予定検索ボタン
         webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
@@ -139,27 +141,45 @@ def get_cal(conf):
             webctrl.click('closeErrDialogue')
             continue
 
-        # 抽出した予定をオブジェクトに格納
-        bookary = webctrl.get('bookingSearchList').split('\n')
-        for i in range(0, len(bookary) - 7, 8):
-            dt = bookary[i + 2].split(' ')
-            tm = dt[3].split('～')
-            book = {
-                'ctyp': CAL_TYPE,
-                'tbgn': datetime.strptime(dt[2][:10] + ' ' + tm[0], '%Y/%m/%d %H:%M'),
-                'tend': datetime.strptime(dt[2][:10] + ' ' + tm[1], '%Y/%m/%d %H:%M'),
-                'summ': group + '、' + bookary[i + 5] + '、' + bookary[i + 6],
-                'desc': bookary[i + 3]
-            }
+        while True:
+            # 抽出した予定をオブジェクトに格納
+            bookary = webctrl.get('bookingSearchList').split('\n')
+            for i in range(0, len(bookary) - (SEARCH_COLUMN - 1), SEARCH_COLUMN):
+                dt = bookary[i + 2].split(' ')
+                dbgn = dt[2][:10]
+                dend = dt[2][:10] #デフォルトは同日        (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '13:00～15:00'])
+                tm = dt[3].split('～')
+                if len(dt) > 4: # 日マタギの場合は特殊形式 (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '19:00～2025/02/23(日)', '00:00'])
+                    dend = tm[1][:10]
+                    tm[1] = dt[4]
 
-            # 同一の予定が無ければ追加
-            sbook = str(book) # 文字列化したオブジェクトで同一チェック
-            if sbook not in old:
-                old.add(sbook)
-                ret.append(book)
-                g_logger.debug('arr:book add  %s' % (sbook))
-            else:
-                g_logger.debug('arr:book skip %s' % (sbook))
+                book = {
+                    'ctyp': CAL_TYPE,
+                    'tbgn': datetime.strptime(dbgn + ' ' + tm[0], '%Y/%m/%d %H:%M'),
+                    'tend': datetime.strptime(dend + ' ' + tm[1], '%Y/%m/%d %H:%M'),
+                    'summ': group + '、' + bookary[i + 5] + '、' + bookary[i + 6] + '、' + bookary[i],
+                    'desc': bookary[i + 3]
+                }
+
+                # 同一の予定が無ければ追加
+                sbook = str(book) # 文字列化したオブジェクトで同一チェック
+                if sbook not in old:
+                    old.add(sbook)
+                    ret.append(book)
+                    g_logger.debug('arr:book add  %s' % (sbook))
+                else:
+                    g_logger.debug('arr:book skip %s' % (sbook))
+            
+            # 次ページ処理
+            if not webctrl.exclick('icnNext', webctrl.By.CLASS_NAME):
+                break
+
+            # 更新を待って次ページの解析
+            time.sleep(WAIT_SEARCH)
+
+        # グループごとに取得した件数を表示しておく
+        g_logger.info('arr:%-4s=%d件' % (group, len(ret) - pre))
+        pre = len(ret)
 
     # 開放
     if not keep:
@@ -195,46 +215,38 @@ def set_cal(conf, merge):
     webctrl.jump(URL_APPEND)
 
     for i in merge:
-        if i['ctyp'] == '+': # 追加マーク
-            summ = i['summ'].split('@')
+        tbgn  = i['tbgn'].strftime('%Y/%m/%d %H:%M')
+        tend  = i['tend'].strftime('%Y/%m/%d %H:%M')
+        summ  = i['summ'].split('@')
+        group = summ[2]
 
-            # 事務所確認
-            group = summ[2]
-            menu = webctrl.find('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
-            if len(menu) < 2:
-                g_logger.error('arr:too small menu2 %s' % (len(menu)))
+        if i['ctyp'] == '+': # 追加マーク
+            # 追加が無効化されている場合はログ出力のみ
+            if conf['skipadd']:
+                g_logger.info('arr:skip add %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
                 continue
 
-            # 事務所が違うなら変更
-            if group not in menu[1].text:
-                g_logger.debug('change:group from %s' % (menu[1].text))
-                menu[1].click()
-                webctrl.click('cmn-hdr-account-menu-link', webctrl.By.CLASS_NAME)
-                time.sleep(WAIT_AFTER)
-                webctrl.wait()
-                store = webctrl.find('storeList__list__innerBox', webctrl.By.CLASS_NAME)
-                for s in store:
-                    if group in s.text:
-                        s.click()
-                        webctrl.wait()
-                        break
-                else:
-                    # 事務所が見つからなかった!?
-                    g_logger.error('arr:store not found2 %s' % (group))
-                    continue
+            # 追加処理開始
+            g_logger.info('arr:add %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
 
-            # とりあえず、空いている予定をクリック
-            webctrl.click('staffSchld', webctrl.By.CLASS_NAME)
+            # 事務所確認
+            ar_checkgroup(group)
+
+            # 空いている予定をクリック
+            # →schldCellが複数あり、場所によりエラーになる。例外なくなるまで叩く
+            for elm in webctrl.find('schldCell', webctrl.By.CLASS_NAME):
+                try:
+                    webctrl.fclick(elm)
+                    time.sleep(WAIT_AFTER)
+                    break # 例外が発生しなかったら継続
+                except:
+                    continue
 
             # メニューをaddmenuにセットして詳細画面を開く
             webctrl.set('bookingMenuBalloonSelectMenu', conf['addmenu'])
             time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
             webctrl.click('bookingRegist')
             time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
-
-            tbgn = i['tbgn'].strftime('%Y/%m/%d %H:%M')
-            tend = i['tend'].strftime('%Y/%m/%d %H:%M')
-            g_logger.info('arr:add %s～%s:%s' % (tbgn, tend, i['desc']))
 
             # 開始時間を設定 (2025/01/23 12:34)
             webctrl.set('rmStartDate',       tbgn[  :10])
@@ -271,6 +283,19 @@ def set_cal(conf, merge):
             # 少しだけ設定を見えるようにする
             time.sleep(WAIT_INPUT)
             webctrl.click('rmRegistButton')
+
+            # 継続するか確認する設定なら入力待ち
+            if conf['waitadd']:
+                ret = input('追加処理を継続しますか？(y/n):')
+                if ret != 'y' and  ret != 'Y':
+                    g_logger.error('追加処理をキャンセルしました')
+                    # ×ボタン & OK
+                    webctrl.click('js-popupRegistClose', webctrl.By.CLASS_NAME)
+                    time.sleep(WAIT_AFTER)
+                    webctrl.click('js-popupAlertClose')
+                    time.sleep(WAIT_AFTER)
+                    continue
+
             time.sleep(WAIT_INPUT)
             webctrl.click('rmRegistButton')
             time.sleep(WAIT_SEARCH)
@@ -283,7 +308,66 @@ def set_cal(conf, merge):
                 time.sleep(WAIT_AFTER)
                 webctrl.click('js-popupAlertClose')
                 time.sleep(WAIT_AFTER)
-            
+
+        if i['ctyp'] == '-': # 削除マーク
+            if conf['skipdel']:
+                g_logger.info('arr:skip del %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
+                continue
+
+            # 予約番号が格納されているかチェック
+            if len(summ) < 4 or len(summ[3]) < 8:
+                g_logger.error('arr:invalid booking No %s' % summ)
+                continue
+
+            ## 事務所確認
+            ar_checkgroup(group)
+            time.sleep(WAIT_AFTER)
+
+            ## 予定検索ページを開く
+            webctrl.jump(URL_SEARCH)
+            time.sleep(WAIT_AFTER)
+
+            # 削除処理追加
+            g_logger.info('arr:del %s: %s～%s:%s %s' % (summ[3], tbgn, tend, i['summ'], i['desc']))
+            webctrl.set('bookingNo', summ[3])
+
+            # 検索実行
+            webctrl.click('btn-search', webctrl.By.CLASS_NAME)
+            time.sleep(WAIT_SEARCH)
+
+            # 検索ヒットが１件かつ、サイボウズ入力の場合だけ削除
+            bookary = webctrl.get('bookingSearchList').split('\n')
+            if len(bookary) != SEARCH_COLUMN:
+                g_logger.warning('arr:del 検索数異常 %d' % (len(bookary)))
+                continue
+
+            # サイボウズ追加でなければ警告
+             
+            if bookary[5] != conf['addmenu']:
+                g_logger.warning('arr:del 検索タイプ異常 "%s"' % (bookary[5]))
+                continue
+
+            # 「該当する予約がありません」の場合はスキップ
+            if 'ありません' in webctrl.get('dialogueMessage'):
+                g_logger.info('arr:del no data')
+                webctrl.click('closeErrDialogue')
+                continue
+
+            # 継続するか確認する設定なら入力待ち
+            if conf['waitdel']:
+                ret = input('削除処理を継続しますか？(y/n):')
+                if ret != 'y' and  ret != 'Y':
+                    g_logger.error('削除処理をキャンセルしました')
+                    continue
+
+            # 削除実行
+            webctrl.click('js-popupCancelTrigger', webctrl.By.CLASS_NAME)
+            time.sleep(WAIT_AFTER)
+            webctrl.set('cancelReason', conf['delreason']) # キャンセル理由
+            time.sleep(WAIT_AFTER)
+            webctrl.click('doCancel')
+            time.sleep(WAIT_AFTER)
+
     # 開放
     if not keep:
         webctrl.deinit()

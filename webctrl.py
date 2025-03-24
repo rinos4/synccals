@@ -17,7 +17,7 @@ from selenium.webdriver.chrome.options import Options           # type: ignore
 from selenium.webdriver.common.by import By                     # type: ignore
 
 import time
-from logging import config, getLogger
+from logconf import g_logger
 
 ################################################################################
 # const
@@ -30,19 +30,11 @@ WAIT_CLICK  = 0.5
 WAIT_AFTER  = 1
 WAIT_PAGE   = 10
 
-# ログ用ファイル
-LOG_CONF	= 'log.conf'
-LOG_KEY		= 'root'
-
 ################################################################################
 # globals
 ################################################################################
 # WebDriver
 g_driver = None
-
-# ロガー
-config.fileConfig(LOG_CONF)
-g_logger = getLogger(LOG_KEY)
 
 ################################################################################
 # util funcs
@@ -56,6 +48,7 @@ def init():
     opt.add_argument("--no-first-run")
     opt.add_argument("--no-default-browser-check")
     opt.add_argument('--no-sandbox')
+    opt.add_experimental_option("excludeSwitches", ['enable-automation', 'enable-logging']) # seleniumのメッセージを消す
     g_driver = webdriver.Chrome(service=Service(executable_path=CHROME_DRIVER_PATH), options=opt)
     g_logger.debug('webctrl::init driver')
     
@@ -189,3 +182,14 @@ def isselect(locator_value, locator_type = By.ID, target = None):
         return None
 
     return elm.is_selected()
+
+# 複数のエレメントが見つかった場合に、例外が無くなるelmを探してクリック
+def exclick(locator_value, locator_type = By.ID, target = None):
+    for elm in find(locator_value, locator_type, target):
+        try:
+            fclick(elm)
+            return True # 例外が発生しなかったら成功
+        except:
+            continue
+    g_logger.debug('webctrl::exclick failed "%s" %s' % (locator_type, locator_value))
+    return False # １つも成功しなかった

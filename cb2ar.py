@@ -12,7 +12,7 @@ import yaml
 import copy
 import re
 
-from logging import config, getLogger
+from logconf import g_logger
 
 ################################################################################
 # const
@@ -30,22 +30,15 @@ MIDDLE_FILE2 = 'log/mid_cb2ar2.yaml'
 # 名前欄に入れられる最大文字列
 MAX_DESC    = 20
 
-# ログ用ファイル
-LOG_CONF	= 'log.conf'
-LOG_KEY		= 'root'
-
 ################################################################################
 # globals
 ################################################################################
-# ロガー
-config.fileConfig(LOG_CONF)
-g_logger = getLogger(LOG_KEY)
 
 ################################################################################
 # util funcs
 ################################################################################
 # 全角変換
-TO_ZENKAKU = str.maketrans(''.join(chr(0x21 + i) for i in range(94)), ''.join(chr(0xff01 + i) for i in range(94)))
+TO_ZENKAKU = str.maketrans(''.join(chr(0x20 + i) for i in range(95)), '　' + ''.join(chr(0xff01 + i) for i in range(94)))
 
 # Airリザーブの姓名で使えない文字の補正
 def normalize_text(s):
@@ -130,8 +123,9 @@ def diff(conf, merge):
 
     # Airリザーブで予約済みの情報をリストアップ (descが全角になっていることに注意)
     booked = set()
+    bookmap = {}
     for item in arr:
-        sep = item['summ'].split('、') # Airリザーブは「、」区切り (loc、メニュー名、room、person)
+        sep = item['summ'].split('、') # Airリザーブは「、」区切り (loc、メニュー名、room、person、予約番号)
         # Airリザーブの検索は、稀に、room/personが逆になる事がある！？
         room  =  sep[2]
         person = sep[3]
@@ -142,8 +136,9 @@ def diff(conf, merge):
         desc = item['desc'][:MAX_DESC].rstrip() if conf['compdesc'] else ''
         ids = '%s %s %s@%s@%s %s' % (item['tbgn'], item['tend'], person, room, sep[0], desc)
         booked.add(ids)
+        bookmap[ids] = item # 逆引き用テーブル
         g_logger.debug('c2a:arr-ids %s' % (ids))
-    booked = tuple(booked)# startswithで探せるようにタプルに変換しておく
+    booked = tuple(booked) # startswithで探せるようにタプルに変換しておく
             
     # 差分チェックして追加/削除が必要なものだけ返す
     deldesc = tuple(conf['deldesc'])
@@ -159,7 +154,29 @@ def diff(conf, merge):
 
             if add['desc'].startswith(deldesc):
                 # 削除ーモード
-                g_logger.warning('c2a:Del not support %s' % (ids))
+                if ids.startswith(booked): # AirリザーブはDESC後半40文字以上が入らないので前方一致で確認
+                    add['ctyp'] = '-' # 削除マーク
+                    # 削除時は予約番号を追加しておく
+                    for id in booked:
+                        if ids.startswith(id):
+                            menu = bookmap[id]['summ'].split('、')[1]
+                            if menu != conf['automenu']:
+                                g_logger.warning('c2a:menu type error %s != %s' % (menu, conf['automenu']))
+                                continue
+
+                            # 自動入力されたものを削除対象とする
+                            g_logger.warning('c2a:del *未サポート*\n%s\n%s %s %s' % (ids, id, bookmap[id]['desc'], bookmap[id]['summ']))
+                            add['summ'] = add['summ'] + '@' + bookmap[id]['summ'].split('、')[-1]
+                            break
+                    else:
+                        # 削除対象がない(恐らく、サイボウズでない予定)
+                        g_logger.warning('c2a:skip del %s' % ids)
+                        continue
+
+                    ret.append(add)
+                    #g_logger.warning('c2a:削除は未サポート %s～%s %s "%s%s"' % (add['tbgn'].strftime("%m/%d %H:%M"), add['tend'].strftime("%H:%M"), add['summ'], add['desc'][:20], '…' if len(add['desc']) > 20 else ''))
+                else:
+                    g_logger.debug('c2a:non %s' % (ids))
             else:
                 # 追加ーモード
                 if ids.startswith(booked): # AirリザーブはDESC後半40文字以上が入らないので前方一致で確認
@@ -167,12 +184,13 @@ def diff(conf, merge):
                 else:
                     add['ctyp'] = '+' # 追加マーク
                     ret.append(add)
-                    g_logger.debug('c2a:add  %s' % (ids))
+                    g_logger.debug('c2a:add %s' % (ids))
     
-    # Airリザーブで入力し易いように事務所順にする
-    ret = sorted(ret, key=lambda x: '%s%s' % (x['summ'].split('@')[2], x['tbgn']))
+    # Airリザーブで入力しやいように優先度の高い方から「1.事務所、2.追加/削除、3.日付」順にする
+    ret = sorted(ret, key=lambda x: '%s%s%s' % (x['summ'].split('@')[2], x['ctyp'], x['tbgn']))
 
-    g_logger.info("c2a:サイボウズ:%d件 => %d会議 => %d予定" % (len(cyb), len(uniq), len(ret)))
+    g_logger.info("c2a:サイボウズ:%d件 → 集約:%d会議 → リザーブ差分:%d予定" % (len(cyb), len(uniq), len(ret)))
+    print('─' * 70)
 
     # デバッグ用に、中間の予定リストをダンプしておく
     with open(MIDDLE_FILE2, mode='w', encoding='utf-8')as f:
