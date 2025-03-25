@@ -3,6 +3,7 @@
 SyncCals is a tool for synchronizing calendars between different services.
 
 ## English Instructions
+This requires that Chrome be installed on your Windows system.
 
 ### 1. Install Python (Windows)
 
@@ -46,7 +47,9 @@ SyncCals is a tool for synchronizing calendars between different services.
     python main.py
     ```
 
-## 日本語での手順
+## 手順 (日本語)
+
+Windows環境でchromeがインストールされていることが前提です。
 
 ### 1. Pythonのインストール (Windows)
 
@@ -97,3 +100,18 @@ SyncCals is a tool for synchronizing calendars between different services.
       python main.py
       pause
     ```
+## カレンダーの同期動作について (日本語)
+### 1. カレンダー情報の取得
+-  confで設定したカレンダをブラウザで巡回し、全ての予定データを取得します。
+   全カレンダーのデータを取得したら、中間のマージファイルとしてlog/mid_merge.yamlに保存します。
+-  confで`skipget=1`が設定されている場合は、ブラウザを使わず、前述の中間のマージファイルを読み込みます。
+
+### 2. カレンダー情報の同期チェック
+-  同期プラグインに応じて、カレンダーの追加/削除が必要な予定を抽出します。
+   現在のプラグイン(cb2ar.py)は、サイボウズの予定とAirリザーブの予定を同期するためのチェックをします。
+   ※サイボウズのみにしかない予定をAirリザーブに追加、かつAirリザーブのみにしか無い予定で本ツールで自動追加した予定をキャンセル。
+
+### 3. カレンダー更新
+-  confで設定したカレンダをブラウザで巡回し、差分の予定を追加/削除します。
+    waitadd/waitdel設定により、追加/削除の直前に、本当に追加してよいか確認の入力が求められます。「y」以外を入力すると、追加or削除は行われません。
+

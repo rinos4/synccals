@@ -42,6 +42,13 @@ g_driver = None
 # ドライバの初期化
 def init():
     global g_driver
+
+    # 初期化済みなら省略
+    if g_driver:
+        g_logger.debug('webctrl::init skip')
+        return
+
+    # 新規作成
     opt = Options()
     opt.add_argument(f'--user-data-dir={CHROME_PROFILE_PATH}')
     opt.add_argument(f"--profile-directory={CHROME_PROFILE_NAME}")
@@ -50,14 +57,21 @@ def init():
     opt.add_argument('--no-sandbox')
     opt.add_experimental_option("excludeSwitches", ['enable-automation', 'enable-logging']) # seleniumのメッセージを消す
     g_driver = webdriver.Chrome(service=Service(executable_path=CHROME_DRIVER_PATH), options=opt)
-    g_logger.debug('webctrl::init driver')
+    g_logger.debug('webctrl::init done')
     
 # ドライバの開放
 def deinit():
     global g_driver
+
+    # 開放済みなら省略
+    if not g_driver:
+        g_logger.debug('webctrl::deinit skip')
+        return
+    
+    # ブラウザ終了
     g_driver.quit()
     g_driver = None
-    g_logger.debug('webctrl::deinit driver')
+    g_logger.debug('webctrl::deinit done')
 
 # ドライバの存在チェック用 (デバッグでdriverを直コントロールしたい場合にも利用)
 def driver():
@@ -71,7 +85,9 @@ def wait(sec = WAIT_PAGE):
 # ページ遷移&受信待ち
 def jump(url):
     g_driver.get(url)
+    time.sleep(WAIT_AFTER)
     wait(WAIT_PAGE)
+    time.sleep(WAIT_AFTER)
 
 # 現在のページを取得
 def url():

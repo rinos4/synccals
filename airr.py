@@ -96,7 +96,7 @@ def get_cal(conf):
     # ユーザ/パスワード画面に遷移した？
     if 'login' in webctrl.url():
         ar_login(conf)
-        webctrl.jump(URL_SEARCH) # 再度予定検索ページに移動
+        #webctrl.jump(URL_SEARCH) # 再度予定検索ページに移動
 
     # 店舗選択画面なら先頭を叩いておく
     selst = webctrl.gets('h1', webctrl.By.TAG_NAME)
@@ -118,18 +118,18 @@ def get_cal(conf):
         webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
         time.sleep(WAIT_AFTER)
 
-        # 終了日を設定
+        # 開始日(現在)～終了日(range加算)を設定
         today = datetime.now()
         daymin = today.replace(hour=0, minute=0, second=0, microsecond=0)
         daymax = daymin + timedelta(days=conf['range'] - 1)
         g_logger.debug('arr:get %s to %s' % (daymin, daymax))
         webctrl.set('bookingFromDt', daymin.strftime('%Y/%m/%d'))
-        webctrl.set('bookingToDt', daymax.strftime('%Y/%m/%d'))
+        webctrl.set('bookingToDt',   daymax.strftime('%Y/%m/%d'))
         time.sleep(WAIT_AFTER) # レンジを1秒表示
 
-        # 予約ステータス指定(キャンセル状態を除く)
+        # 予約ステータス指定(キャンセル状態を除く3項目をON)
         for i in range(3):
-            webctrl.click('bookingStatusCdList%d' % i)    
+            webctrl.click('bookingStatusCdList%d' % i) 
 
         # 検索実行
         webctrl.click('btn-search', webctrl.By.CLASS_NAME)
@@ -145,6 +145,14 @@ def get_cal(conf):
             # 抽出した予定をオブジェクトに格納
             bookary = webctrl.get('bookingSearchList').split('\n')
             for i in range(0, len(bookary) - (SEARCH_COLUMN - 1), SEARCH_COLUMN):
+                # bookary[i + 0]: 予約番号
+                # bookary[i + 2]: 予約時間
+                # bookary[i + 3]: 名前 → 同期ツールではここに予定の詳細(desc)を格納
+                #                 全角のみだが、なぜか半角スペースが入る事がある(名前が空のとき?)
+                # bookary[i + 5]: 予約メニュー名 (自動入力の場合はconf['automenu']が入っている)
+                # bookary[i + 6]: 「、」区切りのリソース(部屋、人)。リソース名順でソートされている?
+
+                # 開始/終了日時の抽出
                 dt = bookary[i + 2].split(' ')
                 dbgn = dt[2][:10]
                 dend = dt[2][:10] #デフォルトは同日        (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '13:00～15:00'])
@@ -153,26 +161,32 @@ def get_cal(conf):
                     dend = tm[1][:10]
                     tm[1] = dt[4]
 
+                # リソース分割
+                room, person = bookary[i + 6].split('、') # 仮でroom/personに入れる
+                if room not in conf['roomres']:
+                    room, person = person, room # 逆なら反転しておく
+
+                # 登録オブジェクト作成
                 book = {
                     'ctyp': CAL_TYPE,
                     'tbgn': datetime.strptime(dbgn + ' ' + tm[0], '%Y/%m/%d %H:%M'),
                     'tend': datetime.strptime(dend + ' ' + tm[1], '%Y/%m/%d %H:%M'),
-                    'summ': group + '、' + bookary[i + 5] + '、' + bookary[i + 6] + '、' + bookary[i],
-                    'desc': bookary[i + 3]
+                    'summ': group + '@' + room + '@' + person + '@' + bookary[i + 5] + '@' + bookary[i],
+                    'desc': bookary[i + 3].replace(' ', '') # 半角スペースが入ることがあるので削除しておく
                 }
 
-                # 同一の予定が無ければ追加
+                # 念のため同一の予定が無ければ追加
                 sbook = str(book) # 文字列化したオブジェクトで同一チェック
                 if sbook not in old:
                     old.add(sbook)
                     ret.append(book)
-                    g_logger.debug('arr:book add  %s' % (sbook))
+                    g_logger.debug('arr:add %s' % (sbook))
                 else:
-                    g_logger.debug('arr:book skip %s' % (sbook))
+                    g_logger.warning('arr:多重登録 %s' % (sbook)) # 多重登録が見つかったら警告しておく
             
             # 次ページ処理
             if not webctrl.exclick('icnNext', webctrl.By.CLASS_NAME):
-                break
+                break # 次ページが押せなければ終了
 
             # 更新を待って次ページの解析
             time.sleep(WAIT_SEARCH)
@@ -214,20 +228,23 @@ def set_cal(conf, merge):
     # 予定追加のページを開く
     webctrl.jump(URL_APPEND)
 
+    count = 0 # 表示用のカウンタ
     for i in merge:
+        count += 1
+        
         tbgn  = i['tbgn'].strftime('%Y/%m/%d %H:%M')
         tend  = i['tend'].strftime('%Y/%m/%d %H:%M')
         summ  = i['summ'].split('@')
-        group = summ[2]
+        group = summ[0]
 
         if i['ctyp'] == '+': # 追加マーク
             # 追加が無効化されている場合はログ出力のみ
             if conf['skipadd']:
-                g_logger.info('arr:skip add %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
+                g_logger.info('arr:skip reg %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
                 continue
 
             # 追加処理開始
-            g_logger.info('arr:add %s～%s:%s %s' % (tbgn, tend, i['summ'], i['desc']))
+            g_logger.info('追加:#%d/%d %s-%s %s %s' % (count, len(merge), tbgn, tend[-5:], i['summ'], i['desc']))
 
             # 事務所確認
             ar_checkgroup(group)
@@ -272,12 +289,12 @@ def set_cal(conf, merge):
                 g_logger.error('arr:Invalid menu %d' % (len(sel)))
                 break # 予期せぬ事態。継続しても同じなので停止する。
             webctrl.fset(sel[0], summ[1])
-            webctrl.fset(sel[1], summ[0])
+            webctrl.fset(sel[1], summ[2])
 
             # セイは全角カナのみ。登録した文字をセット
-            webctrl.set('lastNmKn',          conf['addsei'], webctrl.By.NAME)
-            webctrl.set('lastNm',            i['desc'][:MAX_DESC],             webctrl.By.NAME)
-            webctrl.set('firstNm',           i['desc'][MAX_DESC:MAX_DESC * 2], webctrl.By.NAME)
+            webctrl.set('lastNmKn', conf['addsei'], webctrl.By.NAME)
+            webctrl.set('lastNm',   i['desc'][        :MAX_DESC    ], webctrl.By.NAME)
+            webctrl.set('firstNm',  i['desc'][MAX_DESC:MAX_DESC * 2], webctrl.By.NAME)
             time.sleep(WAIT_INPUT) # 入力確認も兼ねて、表示したまま少し待つ
  
             # 少しだけ設定を見えるようにする
@@ -288,7 +305,7 @@ def set_cal(conf, merge):
             if conf['waitadd']:
                 ret = input('追加処理を継続しますか？(y/n):')
                 if ret != 'y' and  ret != 'Y':
-                    g_logger.error('追加処理をキャンセルしました')
+                    g_logger.info('追加処理をキャンセルしました')
                     # ×ボタン & OK
                     webctrl.click('js-popupRegistClose', webctrl.By.CLASS_NAME)
                     time.sleep(WAIT_AFTER)
@@ -315,21 +332,19 @@ def set_cal(conf, merge):
                 continue
 
             # 予約番号が格納されているかチェック
-            if len(summ) < 4 or len(summ[3]) < 8:
+            if len(summ) < 5 or len(summ[4]) < 8:
                 g_logger.error('arr:invalid booking No %s' % summ)
                 continue
 
             ## 事務所確認
             ar_checkgroup(group)
-            time.sleep(WAIT_AFTER)
 
             ## 予定検索ページを開く
             webctrl.jump(URL_SEARCH)
-            time.sleep(WAIT_AFTER)
 
             # 削除処理追加
-            g_logger.info('arr:del %s: %s～%s:%s %s' % (summ[3], tbgn, tend, i['summ'], i['desc']))
-            webctrl.set('bookingNo', summ[3])
+            g_logger.info('削除:#%d/%d %s-%s %s %s' % (count, len(merge), tbgn, tend[-5:], i['summ'], i['desc']))
+            webctrl.set('bookingNo', summ[4])
 
             # 検索実行
             webctrl.click('btn-search', webctrl.By.CLASS_NAME)
@@ -357,7 +372,7 @@ def set_cal(conf, merge):
             if conf['waitdel']:
                 ret = input('削除処理を継続しますか？(y/n):')
                 if ret != 'y' and  ret != 'Y':
-                    g_logger.error('削除処理をキャンセルしました')
+                    g_logger.info('削除処理をキャンセルしました')
                     continue
 
             # 削除実行

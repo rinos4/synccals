@@ -4,6 +4,7 @@
 # Copyright (c) 2025 rinos4u, released under the MIT open source license.
 #
 # 2025.03.15 rinos4u	new
+# 2025.03.23 rinos4u	一致チェックにdescを含めるか設定できるように変更
 
 ################################################################################
 # import
@@ -11,6 +12,7 @@
 import yaml
 import copy
 import re
+import unicodedata
 
 from logconf import g_logger
 
@@ -22,13 +24,13 @@ MERGE_TYPE = 'cb2ar'
 CAL_CYBOZU = 'cybozu'
 CAL_ARR    = 'airr'
 
-
 CONF_FILE = 'config.yaml'
 MIDDLE_FILE1 = 'log/mid_cb2ar1.yaml'
 MIDDLE_FILE2 = 'log/mid_cb2ar2.yaml'
 
 # 名前欄に入れられる最大文字列
-MAX_DESC    = 20
+MAX_DESC  = 20
+COMP_DESC = 40 # DESCの比較長さ (姓20文字+名20文字で最大40文字まで)
 
 ################################################################################
 # globals
@@ -42,22 +44,22 @@ TO_ZENKAKU = str.maketrans(''.join(chr(0x20 + i) for i in range(95)), '　' + ''
 
 # Airリザーブの姓名で使えない文字の補正
 def normalize_text(s):
-    return s.encode('shift-jis', errors='replace').decode('shift-jis').translate(TO_ZENKAKU)
+    return unicodedata.normalize('NFKC', s.encode('shift-jis', errors='replace').decode('shift-jis')).translate(TO_ZENKAKU)
 
 ################################################################################
 # Plugin API
 ################################################################################
 # 予定比較
-def diff(conf, merge):
+def sync_cal(conf, merge):
     cyb = list(filter(lambda x: x['ctyp'] == CAL_CYBOZU, merge))
     arr = list(filter(lambda x: x['ctyp'] == CAL_ARR,    merge))
     g_logger.debug('c2a:start (%d, %d)' % (len(cyb), len(arr)))
 
-    # 同一予定を集約
+    # サイボウズの同一予定を集約
     uniq = {}
     for item in cyb:
-        key = '%s/%s/%s' % (item['tbgn'], item['tend'], item['desc'])
-        # 同一時刻 & 同一Descなら、同じ予定とみなす
+        key = '%s%s%s' % (item['tbgn'], item['tend'], item['desc'])
+        # 同一時刻 & 同一descなら、同じ予定とみなす
         if key not in uniq:
             uniq[key] = {'item':item, 'room':[], 'person':[]}
         if item['summ'] in conf['room']:
@@ -67,37 +69,50 @@ def diff(conf, merge):
         else:
             g_logger.error('c2a:invalid summ %s' % (item['summ']))
     
-    # 人/事務所/ルームのマッチング
+    # サイボウズの事務所-ルーム-人のマッチングした新mergeを作成
+    # 予定名が除外リストに入っていれば除外
+    deltuple = tuple(conf['deldesc'])       # 先頭一致での削除用 (startswith用にタプル化)
+    skipre   = re.compile(conf['skipdesc']) # 正規表現用
+
     merge2 = []
     for ui in uniq.values():
-        item   = ui['item']
-        room   = ui['room']
-        person = ui['person']
+        # 無視する予定は除外
+        item = ui['item']
+        if item['desc'].startswith(deltuple):
+            g_logger.debug('c2a:del  %s' % (item['desc']))
+            continue
+        if skipre.match(item['desc']):
+            g_logger.debug('c2a:skip %s' % (item['desc']))
+            continue
 
         # 人→roomマッチング
+        room   = ui['room']
+        person = ui['person']
         cat  = set()
         for p in person:
-            locP = conf['person'][p]
+            locP = conf['person'][p]   # 人に紐づいた事務所
             for r in room:
-                locR = conf['room'][r]
+                locR = conf['room'][r] # 部屋に紐づいた事務所
                 if locP == locR[0]:
-                    cat.add('%s@%s@%s' % (p, locR[1], locP))
+                    cat.add('%s@%s@%s' % (locP, locR[1], p)) # 一致あり → そのペアを追加
                     break
             else:
+                # 一致無し → 部屋無し(noroom)で割り当て
                 g_logger.debug('c2a:Unmatch person %s %s, use %s for %s' % (p, room, conf['noroom'], item['desc']))
-                cat.add('%s@%s@%s' % (p, conf['noroom'], locP))
+                cat.add('%s@%s@%s' % (locP, conf['noroom'], p))
             
         # room→人マッチング
         for r in room:
-            locR = conf['room'][r]
+            locR = conf['room'][r]         # 部屋に紐づいた事務所
             for p in person:
-                locP = conf['person'][p]
+                locP = conf['person'][p]   # 人に紐づいた事務所
                 if locP == locR[0]:
-                    cat.add('%s@%s@%s' % (p, locR[1], locP))
+                    cat.add('%s@%s@%s' % (locP, locR[1], p)) # 一致あり → そのペアを追加
                     break
             else:
+                # 一致無し → 人無し(noperson)で割り当て
                 g_logger.debug('c2a:Unmatch room %s %s, use %s for %s' % (r, person, conf['noperson'], item['desc']))
-                cat.add('%s@%s@%s' % (conf['noperson'], locR[1], locR[0]))
+                cat.add('%s@%s@%s' % (locR[0], locR[1], conf['noperson']))
         
         # 除外者チェック
         for eject in conf['eject']:
@@ -113,7 +128,7 @@ def diff(conf, merge):
                         g_logger.debug('c2a:eject %s %s' % (pp, hit))
                         cat.remove(pp)
 
-        # 有効なマッチングが残っていれば登録
+        # 有効なマッチングが1つ以上あれば登録
         if len(cat):
             merge2.append(item | {'summ': list(cat)})
 
@@ -121,73 +136,51 @@ def diff(conf, merge):
     with open(MIDDLE_FILE1, mode='w', encoding='utf-8')as f:
         yaml.safe_dump(merge2, f, allow_unicode=True)
 
-    # Airリザーブで予約済みの情報をリストアップ (descが全角になっていることに注意)
-    booked = set()
-    bookmap = {}
+    # Airリザーブで予約済みの情報をリストアップ
+    airrmap = {} # マッピング用
     for item in arr:
-        sep = item['summ'].split('、') # Airリザーブは「、」区切り (loc、メニュー名、room、person、予約番号)
-        # Airリザーブの検索は、稀に、room/personが逆になる事がある！？
-        room  =  sep[2]
-        person = sep[3]
-        if room not in conf['roomcheck']:
-            room, person = person, room # 逆なら反転しておく
+        # Airリザーブのsummは「@」区切り (事務所@部屋@人@メニュー名@予約番号)
+        sep = item['summ'].split('@')
 
-        # 比較文字列の作成。descはcompdesc設定に応じて変える
-        desc = item['desc'][:MAX_DESC].rstrip() if conf['compdesc'] else ''
-        ids = '%s %s %s@%s@%s %s' % (item['tbgn'], item['tend'], person, room, sep[0], desc)
-        booked.add(ids)
-        bookmap[ids] = item # 逆引き用テーブル
+        # 比較文字の作成 ※compdesc=Falseならdescは比較対象にしない
+        ids = '%s %s %s@%s@%s %s' % (item['tbgn'], item['tend'], sep[0], sep[1], sep[2], item['desc'][:COMP_DESC] if conf['compdesc'] else '') # 開始時間 終了時間 事務所@部屋@人 desc
+        airrmap[ids] = item # マッピングテーブル (重複しているものは後半優先)
         g_logger.debug('c2a:arr-ids %s' % (ids))
-    booked = tuple(booked) # startswithで探せるようにタプルに変換しておく
-            
+    
     # 差分チェックして追加/削除が必要なものだけ返す
-    deldesc = tuple(conf['deldesc'])
-    skipdesc = re.compile(conf['skipdesc'])
     ret = []
     for item in merge2:
+        # エアリザーブに登録できる文字に変換しておく
+        zendesc = normalize_text(item['desc'])[:COMP_DESC]
+
+        # 全summ(事務所@部屋@人)をチェックして、Airリザーブに予定が無ければ追加リストに入れる
         for summ in item['summ']:
-            add = copy.deepcopy(item) | {'summ': summ, 'desc':normalize_text(item['desc'])}
-            ids = '%s %s %s %s' % (add['tbgn'], add['tend'], add['summ'], add['desc'])
-            if skipdesc.match(add['desc']):
-                g_logger.debug('c2a:skip %s' % (ids))
-                continue
+            # エアリザーブは、姓[20]+名[20]に分けて格納されるが、それぞれ前後スペースが削除されることに注意
+            se = zendesc[        :MAX_DESC    ]
+            na = zendesc[MAX_DESC:MAX_DESC * 2]
+            ids = '%s %s %s %s' % (item['tbgn'], item['tend'], summ, se.strip('　') + na.strip('　'))
 
-            if add['desc'].startswith(deldesc):
-                # 削除ーモード
-                if ids.startswith(booked): # AirリザーブはDESC後半40文字以上が入らないので前方一致で確認
-                    add['ctyp'] = '-' # 削除マーク
-                    # 削除時は予約番号を追加しておく
-                    for id in booked:
-                        if ids.startswith(id):
-                            menu = bookmap[id]['summ'].split('、')[1]
-                            if menu != conf['automenu']:
-                                g_logger.warning('c2a:menu type error %s != %s' % (menu, conf['automenu']))
-                                continue
-
-                            # 自動入力されたものを削除対象とする
-                            g_logger.warning('c2a:del *未サポート*\n%s\n%s %s %s' % (ids, id, bookmap[id]['desc'], bookmap[id]['summ']))
-                            add['summ'] = add['summ'] + '@' + bookmap[id]['summ'].split('、')[-1]
-                            break
-                    else:
-                        # 削除対象がない(恐らく、サイボウズでない予定)
-                        g_logger.warning('c2a:skip del %s' % ids)
-                        continue
-
-                    ret.append(add)
-                    #g_logger.warning('c2a:削除は未サポート %s～%s %s "%s%s"' % (add['tbgn'].strftime("%m/%d %H:%M"), add['tend'].strftime("%H:%M"), add['summ'], add['desc'][:20], '…' if len(add['desc']) > 20 else ''))
-                else:
-                    g_logger.debug('c2a:non %s' % (ids))
+            # 既にAirリザーブに登録済？
+            if ids in airrmap:
+                # 登録済 (追加はautomenuで入れたもの以外も同一判定)
+                del airrmap[ids] # 後続処理の削除対象にならないように外しておく
+                g_logger.debug('c2a:match %s' % (ids))
             else:
-                # 追加ーモード
-                if ids.startswith(booked): # AirリザーブはDESC後半40文字以上が入らないので前方一致で確認
-                    g_logger.debug('c2a:reg %s' % (ids))
-                else:
-                    add['ctyp'] = '+' # 追加マーク
-                    ret.append(add)
-                    g_logger.debug('c2a:add %s' % (ids))
+                # 未登録
+                ret.append(copy.deepcopy(item) | {'ctyp': '+', 'summ': summ, 'desc':zendesc})
+                g_logger.debug('c2a:add list %s' % (ids))
+
+    # エアリザーブにしか無い予定は削除リストとして追加
+    for ids, item in airrmap.items():
+        # 自動ツールが入力したものだけを対象にする
+        if item['summ'].split('@')[3] == conf['automenu']: # 自分で追加したのと同じメニュー
+            ret.append(copy.deepcopy(item) | {'ctyp': '-'})
+            g_logger.debug('c2a:del list %s' % (ids))
+        else:
+            g_logger.debug('c2a:skip list %s' % (ids))
     
-    # Airリザーブで入力しやいように優先度の高い方から「1.事務所、2.追加/削除、3.日付」順にする
-    ret = sorted(ret, key=lambda x: '%s%s%s' % (x['summ'].split('@')[2], x['ctyp'], x['tbgn']))
+    # Airリザーブで入力しやいように優先度「1.事務所、2.追加/削除、3.日付」順でソートしておく
+    ret = sorted(ret, key=lambda x: '%s%s%s' % (x['summ'].split('@')[0], x['ctyp'], x['tbgn']))
 
     g_logger.info("c2a:サイボウズ:%d件 → 集約:%d会議 → リザーブ差分:%d予定" % (len(cyb), len(uniq), len(ret)))
     print('─' * 70)
@@ -210,5 +203,5 @@ if __name__ == '__main__':
         with open('log/mid_merge.yaml', mode='r', encoding='utf-8')as f:
             merge = yaml.safe_load(f)
 
-        ret = diff(conf, merge)
+        ret = sync_cal(conf, merge)
         print('%d件抽出' % len(ret))
