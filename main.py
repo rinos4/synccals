@@ -5,6 +5,7 @@
 #
 # 2025.03.15 rinos4u	new
 # 2025.03.23 rinos4u	一致チェックにdescを含めるか設定できるように変更
+# 2025.03.30 rinos4u	処理継続をinputで確認できるよう機能を追加
 
 ################################################################################
 # import
@@ -17,7 +18,7 @@ from logconf import g_logger
 ################################################################################
 # const
 ################################################################################
-APP_VER = '1.0'
+APP_VER = '1.0.3'
 # カレンダー設定ファイル
 CONF_FILE = 'config.yaml'
 
@@ -44,7 +45,14 @@ def get_cals(confs):
     for conf in confs['cals']:
         g_logger.debug('top:import plugin %s for %s (GET)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
-        dat = mod.get_cal(conf)
+        try:
+            dat = mod.get_cal(conf)
+        except Exception:
+            #g_logger.exception('GETプラグイン例外(%s)' % conf['name'])
+            g_logger.debug('%s - get_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+            g_logger.info('GETプラグインの例外により、プログラムを中断します')
+            exit(100)
+
         g_logger.info('%sから%d件取得しました' % (conf['name'], len(dat)))
         ret += dat
     return ret
@@ -54,14 +62,26 @@ def set_cals(confs, merge):
     for conf in confs['cals']:
         g_logger.debug('top:import plugin %s for %s (SET)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
-        mod.set_cal(conf, merge)
+        try:
+            mod.set_cal(conf, merge)
+        except Exception:
+            #g_logger.exception('SETプラグイン例外(%s)' % conf['name'])
+            g_logger.debug('%s - set_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+            g_logger.info('SETプラグインの例外により、プログラムを中断します')
+            exit(200)
 
 # カレンダの同期
 def sync_cals(confs, merge):
     for conf in confs['sync']:
         g_logger.debug('top:import plugin %s for %s (SYNC)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
-        merge = mod.sync_cal(conf, merge)
+        try:
+            merge = mod.sync_cal(conf, merge)
+        except Exception:
+            #g_logger.exception('SYNCプラグイン例外(%s)' % conf['name'])
+            g_logger.debug('%s - sync_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+            g_logger.info('SYNCプラグインの例外により、プログラムを中断します')
+            exit(300)
     return merge
 
 ################################################################################
@@ -99,30 +119,39 @@ if __name__ == '__main__':
 
     # カレンダーの読み込み数を表示して、継続してよいか確認
     print('─' * 70)
-    ret = input('合計%d件読み込みました。\n差分チェックに進みますか？ (y/n):' % len(merge))
-    if ret == 'y' or ret == 'Y':
-        # 同期処理実施
-        merge2 = sync_cals(confs, merge)
-        
-        # 同期が必要なデータを表示
-        count = 0
-        for item in merge2:
-            if item['ctyp'] == '+' or item['ctyp'] == '-':
-                count += 1
-                g_logger.info('%s%3d %s～%s %s "%s%s"' % (item['ctyp'], count, item['tbgn'].strftime("%m/%d %H:%M"), item['tend'].strftime("%H:%M"), '-'.join(item['summ'].split('@')[:3]), item['desc'][:DESC_MAX], '…' if len(item['desc']) > DESC_MAX else ''))
+    print('合計%d件読み込みました。' % len(merge))
+    if confs['waitsync']:
+        ret = input('差分チェックに進みますか？ (y/n):')
+        if ret != 'y' and ret != 'Y':
+            g_logger.info('処理を中止しました')
+            if confs['keepdriver']:
+                webctrl.deinit()
+            exit(0)
 
-        # 同期リストでカレンダー登録してよいか確認
-        if len(merge2):
-            print('─' * 70)
-            ret = input('%d件のカレンダ登録/削除に進みますか？(y/n):' % len(merge2))
-            if ret == 'y' or ret == 'Y':
-                set_cals(confs, merge2) # 継続OKならカレンダに設定
-            else:
-                g_logger.info('top:Skip cal set')
-        else:
-            input('全ての登録が完了しました: (ENT)')
+    # 同期処理を実行し、同期が必要なデータを表示
+    merge2 = sync_cals(confs, merge)
+    count = 0
+    for item in merge2:
+        if item['ctyp'] == '+' or item['ctyp'] == '-':
+            count += 1
+            g_logger.info('%s%3d %s～%s %s "%s%s"' % (item['ctyp'], count, item['tbgn'].strftime("%m/%d %H:%M"), item['tend'].strftime("%H:%M"), '-'.join(item['summ'].split('@')[:3]), item['desc'][:DESC_MAX], '…' if len(item['desc']) > DESC_MAX else ''))
+
+    # 同期リストでカレンダー登録してよいか確認
+    setcount = 0
+    if count:
+        print('─' * 70)
+        if confs['waitset']:
+            ret = input('%d件のカレンダ登録/削除に進みますか？(y/n):' % count)
+            if ret != 'y' and ret != 'Y':
+                g_logger.info('処理を中止しました')
+                if confs['keepdriver']:
+                    webctrl.deinit()
+                    exit(0)
+
+        setcount = set_cals(confs, merge2) # 継続OKならカレンダに設定
+        g_logger.info('%d件/%d件を登録しました' % (setcount, count))
     else:
-        g_logger.info('top:Skip cal merge')
+        g_logger.info('同期する予定がありませんでした')
 
     # ブラウザ常駐設定ならメインで開放
     if confs['keepdriver']:

@@ -25,10 +25,8 @@ CAL_TYPE = 'cybozu'
 CONF_FILE = 'config.yaml'
 MIDDLE_FILE = 'log/mid_cybozu.yaml'
 
-WAIT_CLICK  = 1
-WAIT_PAGE   = 10
-WAIT_AFTER  = 1
-WAIT_SEARCH = 1
+WAIT_LOGIN  = 1 # どのアカウントでログインしたか分かるように表示を止める
+WAIT_SEARCH = 1 # カレンダ表示が更新されるまでの時間
 
 BTN_NEXTWEEK = -1 # 翌週ボタンはユニークIDがないためインデックスで指定(-1=最後のボタン)
 
@@ -48,7 +46,7 @@ def cb_login(conf):
     if not webctrl.isselect('input-rememberMe-slash'):
         webctrl.click('label-checkbox', webctrl.By.CLASS_NAME)
 
-    time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
+    time.sleep(WAIT_LOGIN) # 入力確認も兼ねて、表示したまま少し待つ
 
     # クリックしてページ遷移を待つ
     webctrl.click('login-button', webctrl.By.CLASS_NAME)
@@ -92,6 +90,8 @@ def get_cal(conf):
     g_logger.debug('cyb:get %s to %s' % (daymin, daymax))
 
     # 登録された全グループの予定を順に抽出
+    alldayre   = re.compile(conf['alldayre']) # 正規表現の終日判定
+
     for group in conf['group']:
         webctrl.jump(URL_SEARCH % conf['serv']) # 日付を戻すためにグループ毎にトップカレンダーに移動
         #webctrl.selvalue('groupSelect', group['value'])
@@ -104,7 +104,7 @@ def get_cal(conf):
             # 2回目以降は[翌週]ボタンで進む (押下後の先頭は日曜日。1週間後でない事に注意)
             # このため、1回目と2回目で日付重複することがある。また最終日は余分なデータが追加されることがある。
             if week:
-                btn = webctrl.find('scheduleMove', webctrl.By.CLASS_NAME)
+                btn = webctrl.finds('scheduleMove', webctrl.By.CLASS_NAME)
                 webctrl.fclick(btn[BTN_NEXTWEEK]) # 最後のボタンが翌週
                 webctrl.wait() # ページ読み込み待ち
                 time.sleep(WAIT_SEARCH)
@@ -115,7 +115,7 @@ def get_cal(conf):
             g_logger.debug('cyb:week %s: %s...' % (group['name'], '/'.join(title[:3])))
             
             # グループ予定のアイテムをサーチ        
-            for row in webctrl.find('eventrow', webctrl.By.CLASS_NAME):
+            for row in webctrl.finds('eventrow', webctrl.By.CLASS_NAME):
                 col = webctrl.get('th', webctrl.By.TAG_NAME, row)
                 key = col.split()[0]
                 if key not in group['target']:
@@ -146,7 +146,7 @@ def get_cal(conf):
                         idx += 1
 
                         # 終日予定の確認
-                        if tm.startswith(tuple(conf['allday'])):
+                        if tm.startswith(tuple(conf['alldaysw'])) or alldayre.match(tm):
                             desc = tm
                             tm = conf['alltime']
                         else:

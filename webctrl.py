@@ -15,6 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC# type: ignore
 from selenium.webdriver.chrome.service import Service           # type: ignore
 from selenium.webdriver.chrome.options import Options           # type: ignore
 from selenium.webdriver.common.by import By                     # type: ignore
+from selenium.webdriver.common.action_chains import ActionChains# type: ignore
 
 import time
 from logconf import g_logger
@@ -26,8 +27,9 @@ CHROME_PROFILE_PATH = r'C:\work\dev\synccals\chrome_prof'
 CHROME_PROFILE_NAME = 'Default'
 CHROME_DRIVER_PATH  = 'driver/chromedriver.exe'
 
-WAIT_CLICK  = 0.5
-WAIT_AFTER  = 1
+WAIT_CLICK  = 0.2
+WAIT_AFTER  = 0.5
+WAIT_SCROLL = 0.5
 WAIT_PAGE   = 10
 
 ################################################################################
@@ -95,56 +97,74 @@ def url():
 
 # エレメントの簡易制御 ##################################################################
 
-# エレメントの抽出(複数)
+# エレメントの抽出(1つ)
 def find(locator_value, locator_type = By.ID, target = None):
-    return (target or g_driver).find_elements(locator_type, locator_value)
+    return (target or g_driver).find_element(locator_type, locator_value)
 
-# 複数エレメントのテキスト抽出
-def gets(locator_value, locator_type = By.ID, target = None):
-    return [i.text for i in find(locator_value, locator_type, target)]
+# エレメントの抽出(複数)
+def finds(locator_value, locator_type = By.ID, target = None):
+    return (target or g_driver).find_elements(locator_type, locator_value)
 
 # 先頭エレメントのテキスト文字列を取得
 def get(locator_value, locator_type = By.ID, target = None):
     # 対象エレメントを取得
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::get %s failed' % locator_value)
         return None
 
     return elm.text
 
-# テキスト文字列を設定
-def set(locator_value, text, locator_type = By.ID, target = None):
-    # 対象エレメントを取得
-    elm = (target or g_driver).find_element(locator_type, locator_value)
-    if not elm:
-        g_logger.error('webctrl::set %s failed' % locator_value)
-        return None
+# 複数エレメントのテキスト抽出
+def gets(locator_value, locator_type = By.ID, target = None):
+    return [i.text for i in finds(locator_value, locator_type, target)]
 
-    # テキストをクリア
-    if elm.tag_name == 'input':
-        elm.clear()
-
-    # 新しいテキストを入力
-    elm.send_keys(text)
+# find結果のエレメントへ移動
+def fmove(elm, center = 1):
+    if center:
+        # 画面センタに移動 (move_to_elementだとヘッダ/フッタが邪魔してクリックできないことがある)
+        g_driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elm)
+    else:
+        ActionChains(g_driver).move_to_element(elm).perform() #画面内に移動
+    time.sleep(WAIT_SCROLL)
 
 # find結果のエレメントをクリック
-def fclick(elm):
+def fclick(elm, center = 1):
+    fmove(elm, center)
     elm.click()
     time.sleep(WAIT_CLICK)
 
 # find結果のエレメントにセット
-def fset(elm, text):
+def fset(elm, text, center = 1):
+    fmove(elm, center)
     if elm.tag_name == 'input':
         elm.clear()
     # 新しいテキストを入力
     elm.send_keys(text)
 
 # 検索しつつ操作 #####################################################################
+# テキスト文字列を設定
+def set(locator_value, text, locator_type = By.ID, target = None):
+    # 対象エレメントを取得
+    elm = find(locator_value, locator_type, target)
+    if not elm:
+        g_logger.error('webctrl::set %s failed' % locator_value)
+        return None
+    
+    fset(elm, text)
+
+# エレメントへ移動
+def move(locator_value, locator_type = By.ID, target = None):
+    elm = find(locator_value, locator_type, target)
+    if not elm:
+        g_logger.error('webctrl::move %s failed' % locator_value)
+        return None
+    fmove(elm)
+
 # ボタンをクリック
 def click(locator_value, locator_type = By.ID, target = None):
     # 対象エレメントを取得
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::click %s failed' % locator_value)
         return None
@@ -152,7 +172,7 @@ def click(locator_value, locator_type = By.ID, target = None):
 
 # Selectをインデックスで指定
 def selindex(locator_value, index, locator_type = By.ID, target = None):
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::selindex %s failed' % locator_value)
         return None
@@ -165,7 +185,7 @@ def selindex(locator_value, index, locator_type = By.ID, target = None):
 
 # Selectを値で指定
 def selvalue(locator_value, val, locator_type = By.ID, target = None):
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::selvalue %s failed' % locator_value)
         return None
@@ -178,7 +198,7 @@ def selvalue(locator_value, val, locator_type = By.ID, target = None):
 
 # Selectを値で指定
 def selindexvalue(locator_value, val, locator_type = By.ID, target = None):
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::selvalue %s failed' % locator_value)
         return None
@@ -192,7 +212,7 @@ def selindexvalue(locator_value, val, locator_type = By.ID, target = None):
 
 # チェックボックスのチェック確認
 def isselect(locator_value, locator_type = By.ID, target = None):
-    elm = (target or g_driver).find_element(locator_type, locator_value)
+    elm = find(locator_value, locator_type, target)
     if not elm:
         g_logger.error('webctrl::selvalue %s failed' % locator_value)
         return None
@@ -201,7 +221,7 @@ def isselect(locator_value, locator_type = By.ID, target = None):
 
 # 複数のエレメントが見つかった場合に、例外が無くなるelmを探してクリック
 def exclick(locator_value, locator_type = By.ID, target = None):
-    for elm in find(locator_value, locator_type, target):
+    for elm in finds(locator_value, locator_type, target):
         try:
             fclick(elm)
             return True # 例外が発生しなかったら成功

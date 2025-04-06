@@ -4,6 +4,7 @@
 # Copyright (c) 2025 rinos4u, released under the MIT open source license.
 #
 # 2025.03.15 rinos4u	new
+# 2025.03.30 rinos4u	予定の追加ボタンが押せないケースがありリトライ追加(少し改善)
 
 ################################################################################
 # import
@@ -26,9 +27,11 @@ CAL_TYPE = 'airr'
 CONF_FILE = 'config.yaml'
 MIDDLE_FILE = 'log/mid_airr.yaml'
 
-WAIT_AFTER  = 0.5
-WAIT_SEARCH = 3
-WAIT_INPUT  = 2
+WAIT_LOGIN  = 1 # どのアカウントでログインしたか分かるように表示を止める
+WAIT_SHOW   = 1 # どの設定を入れたか分かるように表示を止める
+WAIT_AFTER  = 1
+WAIT_SET    = 0.5
+WAIT_SEARCH = 3 # 時間のかかる検索情報表示
 
 # 名前欄に入れられる最大文字列
 MAX_DESC    = 20
@@ -48,7 +51,7 @@ def ar_login(conf):
     # ユーザ/パスワード設定
     webctrl.set('username', conf['user'], webctrl.By.NAME)
     webctrl.set('password', conf['pass'], webctrl.By.NAME)
-    time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
+    time.sleep(WAIT_LOGIN) # 入力確認も兼ねて、表示したまま少し待つ
 
     # クリックしてページ遷移を待つ
     webctrl.click('primary', webctrl.By.CLASS_NAME)
@@ -57,7 +60,7 @@ def ar_login(conf):
 # 事務所が違うなら変更
 def ar_checkgroup(group):
     # 事務所情報を取得
-    menu = webctrl.find('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
+    menu = webctrl.finds('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
     if len(menu) < 2:
         g_logger.error('arr:too small menu %s' % (len(menu)))
         return 1
@@ -68,7 +71,7 @@ def ar_checkgroup(group):
         webctrl.click('cmn-hdr-account-menu-link', webctrl.By.CLASS_NAME)
         time.sleep(WAIT_AFTER)
         webctrl.wait()
-        store = webctrl.find('storeList__list__innerBox', webctrl.By.CLASS_NAME)
+        store = webctrl.finds('storeList__list__innerBox', webctrl.By.CLASS_NAME)
         for s in store:
             if group in s.text:
                 s.click()
@@ -115,7 +118,9 @@ def get_cal(conf):
         ar_checkgroup(group)
         
         # 予定検索ボタン
-        webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
+        #webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
+        # 予定検索ページを開く
+        webctrl.jump(URL_SEARCH)
         time.sleep(WAIT_AFTER)
 
         # 開始日(現在)～終了日(range加算)を設定
@@ -125,7 +130,6 @@ def get_cal(conf):
         g_logger.debug('arr:get %s to %s' % (daymin, daymax))
         webctrl.set('bookingFromDt', daymin.strftime('%Y/%m/%d'))
         webctrl.set('bookingToDt',   daymax.strftime('%Y/%m/%d'))
-        time.sleep(WAIT_AFTER) # レンジを1秒表示
 
         # 予約ステータス指定(キャンセル状態を除く3項目をON)
         for i in range(3):
@@ -208,6 +212,7 @@ def get_cal(conf):
 # 予定設定 ########################################################################
 # グループ切り替えを最小限にするために、mergeは事務所順に並べておくことが望ましい
 def set_cal(conf, merge):
+    retcount = 0
     keep = webctrl.driver()
     if not keep:
         webctrl.init()
@@ -251,40 +256,70 @@ def set_cal(conf, merge):
 
             # 空いている予定をクリック
             # →schldCellが複数あり、場所によりエラーになる。例外なくなるまで叩く
-            for elm in webctrl.find('schldCell', webctrl.By.CLASS_NAME):
+            for elm in webctrl.finds('schldCell', webctrl.By.CLASS_NAME):
                 try:
-                    webctrl.fclick(elm)
-                    time.sleep(WAIT_AFTER)
+                    webctrl.fmove(elm, 0)
+                    time.sleep(WAIT_AFTER) # クリックできる場所まで移動するのを待つ
+                    webctrl.fclick(elm, 0)
                     break # 例外が発生しなかったら継続
                 except:
-                    continue
+                    pass
+
+                # ここは上手く押せないことがあるので、もう1回トライ
+                try:
+                    webctrl.fmove(elm)
+                    time.sleep(WAIT_AFTER) # クリックできる場所まで移動するのを待つ
+                    webctrl.fclick(elm)
+                    break # 例外が発生しなかったら継続
+                except:
+                    pass
+
+                # ここは上手く押せないことがあるので、もう1回トライ
+                try:
+                    webctrl.fmove(elm, 0)
+                    time.sleep(WAIT_AFTER) # クリックできる場所まで移動するのを待つ
+                    webctrl.fclick(elm, 0)
+                    break # 例外が発生しなかったら継続
+                except:
+                    pass
+
+            else:
+                g_logger.error('arr:予定の追加ボタンが押せませんでした')
+                if conf['waitbtnerror']:
+                    ret = input('手動で操作すると継続できる可能性があります。\n手動操作して処理を続けますか？(y/n):')
+                    if ret != 'y' and ret != 'Y':
+                        g_logger.info('追加処理をキャンセルしました')
+                        if not keep:
+                            webctrl.deinit()
+                        return retcount
+                continue
 
             # メニューをaddmenuにセットして詳細画面を開く
             webctrl.set('bookingMenuBalloonSelectMenu', conf['addmenu'])
-            time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
+            time.sleep(WAIT_SET) # 入力確認も兼ねて、表示したまま少し待つ
             webctrl.click('bookingRegist')
-            time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
+            time.sleep(WAIT_SET) # 入力確認も兼ねて、表示したまま少し待つ
 
             # 開始時間を設定 (2025/01/23 12:34)
             webctrl.set('rmStartDate',       tbgn[  :10])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.selindexvalue('rmStartTimeHour',   tbgn[11:13])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.selindexvalue('rmStartTimeMinute', tbgn[14:16])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
 
             # 終了時間を設定
             webctrl.set('rmEndDate',         tend[  :10])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.selindexvalue('rmEndTimeHour',     tend[11:13])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.selindexvalue('rmEndTimeMinute',   tend[14:16])
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.click('exItem01', webctrl.By.NAME) # カレンダのフォーカス外し
 
             # 場所/人をセット
-            sel = webctrl.find('resrcSelect', webctrl.By.CLASS_NAME)
-            time.sleep(WAIT_AFTER) # 入力確認も兼ねて、表示したまま少し待つ
+            sel = webctrl.finds('resrcSelect', webctrl.By.CLASS_NAME)
+            time.sleep(WAIT_SET) # 入力確認も兼ねて、表示したまま少し待つ
             if len(sel) < 2:
                 g_logger.error('arr:Invalid menu %d' % (len(sel)))
                 break # 予期せぬ事態。継続しても同じなので停止する。
@@ -295,16 +330,15 @@ def set_cal(conf, merge):
             webctrl.set('lastNmKn', conf['addsei'], webctrl.By.NAME)
             webctrl.set('lastNm',   i['desc'][        :MAX_DESC    ], webctrl.By.NAME)
             webctrl.set('firstNm',  i['desc'][MAX_DESC:MAX_DESC * 2], webctrl.By.NAME)
-            time.sleep(WAIT_INPUT) # 入力確認も兼ねて、表示したまま少し待つ
  
             # 少しだけ設定を見えるようにする
-            time.sleep(WAIT_INPUT)
+            time.sleep(WAIT_SHOW)
             webctrl.click('rmRegistButton')
 
             # 継続するか確認する設定なら入力待ち
             if conf['waitadd']:
                 ret = input('追加処理を継続しますか？(y/n):')
-                if ret != 'y' and  ret != 'Y':
+                if ret != 'y' and ret != 'Y':
                     g_logger.info('追加処理をキャンセルしました')
                     # ×ボタン & OK
                     webctrl.click('js-popupRegistClose', webctrl.By.CLASS_NAME)
@@ -313,9 +347,9 @@ def set_cal(conf, merge):
                     time.sleep(WAIT_AFTER)
                     continue
 
-            time.sleep(WAIT_INPUT)
+            time.sleep(WAIT_SHOW)
             webctrl.click('rmRegistButton')
-            time.sleep(WAIT_SEARCH)
+            time.sleep(WAIT_SHOW)
 
             # 上手く押せなかった場合はエラーを出す
             if webctrl.get('rmRegistButton'):
@@ -325,6 +359,8 @@ def set_cal(conf, merge):
                 time.sleep(WAIT_AFTER)
                 webctrl.click('js-popupAlertClose')
                 time.sleep(WAIT_AFTER)
+            else:
+                retcount += 1 # 追加成功
 
         if i['ctyp'] == '-': # 削除マーク
             if conf['skipdel']:
@@ -371,7 +407,7 @@ def set_cal(conf, merge):
             # 継続するか確認する設定なら入力待ち
             if conf['waitdel']:
                 ret = input('削除処理を継続しますか？(y/n):')
-                if ret != 'y' and  ret != 'Y':
+                if ret != 'y' and ret != 'Y':
                     g_logger.info('削除処理をキャンセルしました')
                     continue
 
@@ -379,13 +415,16 @@ def set_cal(conf, merge):
             webctrl.click('js-popupCancelTrigger', webctrl.By.CLASS_NAME)
             time.sleep(WAIT_AFTER)
             webctrl.set('cancelReason', conf['delreason']) # キャンセル理由
-            time.sleep(WAIT_AFTER)
+            time.sleep(WAIT_SET)
             webctrl.click('doCancel')
             time.sleep(WAIT_AFTER)
+            retcount += 1 # 削除成功
 
     # 開放
     if not keep:
         webctrl.deinit()
+    
+    return retcount
 
 ################################################################################
 # main
