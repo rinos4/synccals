@@ -91,7 +91,7 @@ def ar_checkgroup(group):
 def get_cal(conf):
     keep = webctrl.driver()
     if not keep:
-        webctrl.init()
+        webctrl.init(conf['devscale'])
 
     # 予定検索ページを開く
     webctrl.jump(URL_SEARCH)
@@ -215,7 +215,7 @@ def set_cal(conf, merge):
     retcount = 0
     keep = webctrl.driver()
     if not keep:
-        webctrl.init()
+        webctrl.init(conf['devscale'])
 
     # 予定追加のページを開く
     webctrl.jump(URL_APPEND)
@@ -425,6 +425,11 @@ def set_cal(conf, merge):
         webctrl.deinit()
     
     return retcount
+
+################################################################################
+# コピーモードの予定取得（エアリザーブからは取得しない）
+def get_one_cal(conf):
+    return []
 
 ################################################################################
 # main

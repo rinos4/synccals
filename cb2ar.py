@@ -13,6 +13,7 @@ import yaml
 import copy
 import re
 import unicodedata
+from datetime import datetime, timedelta
 
 from logconf import g_logger
 
@@ -31,6 +32,9 @@ MIDDLE_FILE2 = 'log/mid_cb2ar2.yaml'
 # 名前欄に入れられる最大文字列
 MAX_DESC  = 20
 COMP_DESC = 40 # DESCの比較長さ (姓20文字+名20文字で最大40文字まで)
+
+# 開始/終了時刻の間隔の最小値[s]
+MINIMAL_DIFF = 10 * 60 # 最低でも10分以上が必要
 
 ################################################################################
 # globals
@@ -127,6 +131,17 @@ def sync_cal(conf, merge):
                     if len(hit):
                         g_logger.debug('c2a:eject %s %s' % (pp, hit))
                         cat.remove(pp)
+        
+        # 曜日に応じたSUMM変更処理
+        for ws in conf['weeksumm']:
+            if ws[0] & (1 << item['tbgn'].weekday()): # 対象曜日
+                for su in list(cat):
+                    # もし正規表現で置換されたらcatを入れ替える
+                    rep = re.sub(ws[1], ws[2], su)
+                    if rep != su:
+                        g_logger.debug('c2a:replce %s %s -> %s' % (item['tbgn'], su, rep))
+                        cat.remove(su)
+                        cat.add(rep)
 
         # 有効なマッチングが1つ以上あれば登録
         if len(cat):
@@ -158,6 +173,12 @@ def sync_cal(conf, merge):
             # エアリザーブは、姓[20]+名[20]に分けて格納されるが、それぞれ前後スペースが削除されることに注意
             se = zendesc[        :MAX_DESC    ]
             na = zendesc[MAX_DESC:MAX_DESC * 2]
+
+            # サイボウズは開始時刻=終了時刻を設定できるが、エアリザーブはエラーとなるため最小期間を加える
+            if (item['tend'] - item['tbgn']).seconds < MINIMAL_DIFF:
+                item['tend'] = item['tbgn'] + timedelta(seconds=MINIMAL_DIFF)
+                g_logger.info('arr:Change end time to %s' % (item['tend']))
+
             ids = '%s %s %s %s' % (item['tbgn'], item['tend'], summ, se.strip('　') + na.strip('　'))
 
             # 既にAirリザーブに登録済？
@@ -179,7 +200,7 @@ def sync_cal(conf, merge):
         else:
             g_logger.debug('c2a:skip list %s' % (ids))
     
-    # Airリザーブで入力しやいように優先度「1.事務所、2.追加/削除、3.日付」順でソートしておく
+    # Airリザーブの入力を最適化するため、優先度「1.事務所、2.追加/削除、3.日付」順でソートしておく
     ret = sorted(ret, key=lambda x: '%s%s%s' % (x['summ'].split('@')[0], x['ctyp'], x['tbgn']))
 
     g_logger.info("c2a:サイボウズ:%d件 → 集約:%d会議 → リザーブ差分:%d予定" % (len(cyb), len(uniq), len(ret)))

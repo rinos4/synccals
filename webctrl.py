@@ -42,7 +42,7 @@ g_driver = None
 # util funcs
 ################################################################################
 # ドライバの初期化
-def init():
+def init(scale = '1.0'):
     global g_driver
 
     # 初期化済みなら省略
@@ -57,9 +57,11 @@ def init():
     opt.add_argument("--no-first-run")
     opt.add_argument("--no-default-browser-check")
     opt.add_argument('--no-sandbox')
+    opt.add_argument('--force-device-scale-factor=' + scale)
     opt.add_experimental_option("excludeSwitches", ['enable-automation', 'enable-logging']) # seleniumのメッセージを消す
     g_driver = webdriver.Chrome(service=Service(executable_path=CHROME_DRIVER_PATH), options=opt)
     g_logger.debug('webctrl::init done')
+    #g_driver.execute_script("document.body.style.zoom='100%'")
     
 # ドライバの開放
 def deinit():
@@ -118,6 +120,14 @@ def get(locator_value, locator_type = By.ID, target = None):
 # 複数エレメントのテキスト抽出
 def gets(locator_value, locator_type = By.ID, target = None):
     return [i.text for i in finds(locator_value, locator_type, target)]
+
+# エレメントを文字列マッチで抽出(1つ)
+def search(locator_value, start, locator_type = By.ID, target = None):
+    for elm in finds(locator_value, locator_type, target):
+        if elm.text.startswith(start):
+            return elm
+    g_logger.error('webctrl::search %s failed' % start)
+    return None
 
 # find結果のエレメントへ移動
 def fmove(elm, center = 1):

@@ -18,7 +18,10 @@ from logconf import g_logger
 ################################################################################
 # const
 ################################################################################
+# 予定表ページ
 URL_SEARCH = 'https://%s.cybozu.com/o/ag.cgi?page=ScheduleIndex'
+# 詳細ページ (待機用)
+URL_DETAIL = 'https://guardian-lo.cybozu.com/o/ag.cgi?page=ScheduleView&UID='
 
 CAL_TYPE = 'cybozu'
 
@@ -70,7 +73,7 @@ def calcmin(s):
 def get_cal(conf):
     keep = webctrl.driver()
     if not keep:
-        webctrl.init()
+        webctrl.init(conf['devscale'])
 
     # 予定検索ページを開く
     webctrl.jump(URL_SEARCH % conf['serv'])
@@ -98,6 +101,9 @@ def get_cal(conf):
         webctrl.selindexvalue('groupSelect', group['name'])
         webctrl.wait() # ページ読み込み待ち
         time.sleep(WAIT_SEARCH) # グループ変更後の更新待ち
+        
+        # 受付可能なリストを作成
+        groupOK = tuple(group['target'])
 
         # 指定期間をサーチ
         for week in range(int(conf['range'] / 7) + 1):
@@ -117,11 +123,16 @@ def get_cal(conf):
             # グループ予定のアイテムをサーチ        
             for row in webctrl.finds('eventrow', webctrl.By.CLASS_NAME):
                 col = webctrl.get('th', webctrl.By.TAG_NAME, row)
-                key = col.split()[0]
-                if key not in group['target']:
+                if not col.startswith(groupOK):
                     g_logger.debug('cyb:skip %s' % (key))
                     continue # 対象外のIDはスキップ
-                #g_logger.debug('cyb:check %s' % (key))
+                key = col.split()[0]
+                
+                ##key = col.split()[0]
+                ##if key not in group['target']:
+                ##    g_logger.debug('cyb:skip %s' % (key))
+                ##    continue # 対象外のIDはスキップ
+                ###g_logger.debug('cyb:check %s' % (key))
 
                 # 有効な予定を抽出(1週間の列挙)
                 col = webctrl.gets('td', webctrl.By.TAG_NAME, row)
@@ -216,6 +227,72 @@ def get_cal(conf):
 # TODO
 def set_cal(conf, merge):
     return 
+
+################################################################################
+# コピーモードの予定取得
+def get_one_cal(conf):
+    keep = webctrl.driver()
+    if not keep:
+        webctrl.init() #  コピーモードはユーザ操作させるためdevscaleは指定しない
+
+    # 予定検索ページを開く
+    webctrl.jump(URL_SEARCH % conf['serv'])
+
+    # ユーザ/パスワード画面に遷移した？
+    if 'login' in webctrl.url():
+        cb_login(conf)
+
+    # ユーザが特定の予定ページを押すのを待つ
+    print('抽出する予定を選択してください')
+    while not webctrl.url().startswith(URL_DETAIL):
+        time.sleep(WAIT_SEARCH) # グループ変更後の更新待ち
+
+    # 参加者が縮小表示されている可能性があるため、フル表示しておく
+    tofull = webctrl.search('a', '参加者をすべて表示', webctrl.By.TAG_NAME)
+    if tofull:
+        webctrl.fclick(tofull)
+        webctrl.wait(WAIT_SEARCH) # ページ読み込み待ち
+
+    # 詳細ページからテキスト抽出取得
+    text = webctrl.get('scheduleDataView', webctrl.By.CLASS_NAME)
+    dt      = re.search(r'日時\s*(20.*)', text).group(1)
+    desc    = re.search(r'予定\n(.*)',    text).group(1)
+    room    = re.search(r'施設\s*(.*)',   text).group(1)
+    person  = re.search(r'参加者\s*(.*)', text).group(1)
+
+    # 扱いやすい構造に変換
+    dt = re.split('[ 　年月日]+', dt)
+    roomOK = tuple(conf['group'][0]['target'])
+    room = list(map(lambda x: x.split()[0], filter(lambda a: a.startswith(roomOK), room.split(' '))))
+    personOK = tuple(conf['group'][1]['target'])
+    person = list(map(lambda x: x.split()[0], filter(lambda a: a.startswith(personOK), person.split(' '))))
+
+    # 日付パターン
+    # 2025 年 1 月 23 日 （木） （終日）
+    # 2025 年 1 月 23 日 （木） 10 時 00 分 ～ 24 時 00 分
+    day  = datetime(*[int(n) for n in dt[:3]])
+    if len(dt) < 13: # 終日
+        tbgn, tend = conf['alltime'].split('-')
+    else:
+        tbgn = dt[4] + ':' + dt[6]
+        tend = dt[9] + ':' + dt[11]
+
+    ret = []
+    for summ in person + room:
+        # 共通フォーマットに設定
+        book = {
+        'ctyp': CAL_TYPE,
+            'tbgn': day + timedelta(minutes = calcmin(tbgn)),
+            'tend': day + timedelta(minutes = calcmin(tend)),
+            'summ': summ,
+            'desc': desc  
+        }
+        g_logger.debug('cyb:book:%s' % (book))
+        ret.append(book)
+
+    if not keep:
+        webctrl.deinit()
+    return ret
 
 ################################################################################
 # main
