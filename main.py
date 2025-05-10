@@ -61,16 +61,18 @@ def get_cals(confs):
 
 # 同期した差分を各カレンダに設定
 def set_cals(confs, merge):
+    ret = 0
     for conf in confs['cals']:
         g_logger.debug('top:import plugin %s for %s (SET)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
         try:
-            mod.set_cal(conf, merge)
+            ret += mod.set_cal(conf, merge)
         except Exception:
             #g_logger.exception('SETプラグイン例外(%s)' % conf['name'])
             g_logger.debug('%s - set_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
             g_logger.info('SETプラグインの例外により、プログラムを中断します')
             exit(102)
+    return ret
 
 # カレンダの同期
 def sync_cals(confs, merge):
@@ -175,7 +177,6 @@ def DoCopy(confs):
             g_logger.info('%s%3d %s～%s %s "%s%s"' % (item['ctyp'], count, item['tbgn'].strftime("%m/%d %H:%M"), item['tend'].strftime("%H:%M"), '-'.join(item['summ'].split('@')[:3]), item['desc'][:DESC_MAX], '…' if len(item['desc']) > DESC_MAX else ''))
     
     # 同期リストでカレンダー登録してよいか確認
-    setcount = 0
     if count:
         print('─' * 70)
         if confs['waitcopy']:

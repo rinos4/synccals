@@ -179,3 +179,4 @@ chrome_prof/*
 log/*
 *.bat
 *.bak
+test.*

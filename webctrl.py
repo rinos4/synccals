@@ -126,7 +126,7 @@ def search(locator_value, start, locator_type = By.ID, target = None):
     for elm in finds(locator_value, locator_type, target):
         if elm.text.startswith(start):
             return elm
-    g_logger.error('webctrl::search %s failed' % start)
+    g_logger.debug('webctrl::search %s failed' % start)
     return None
 
 # find結果のエレメントへ移動

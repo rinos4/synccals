@@ -21,7 +21,7 @@ from logconf import g_logger
 # 予定表ページ
 URL_SEARCH = 'https://%s.cybozu.com/o/ag.cgi?page=ScheduleIndex'
 # 詳細ページ (待機用)
-URL_DETAIL = 'https://guardian-lo.cybozu.com/o/ag.cgi?page=ScheduleView&UID='
+URL_DETAIL = 'https://%s.cybozu.com/o/ag.cgi?page=ScheduleView&UID='
 
 CAL_TYPE = 'cybozu'
 
@@ -126,14 +126,8 @@ def get_cal(conf):
                 if not col.startswith(groupOK):
                     g_logger.debug('cyb:skip %s' % (key))
                     continue # 対象外のIDはスキップ
-                key = col.split()[0]
+                key = col.split('\n')[0].strip()
                 
-                ##key = col.split()[0]
-                ##if key not in group['target']:
-                ##    g_logger.debug('cyb:skip %s' % (key))
-                ##    continue # 対象外のIDはスキップ
-                ###g_logger.debug('cyb:check %s' % (key))
-
                 # 有効な予定を抽出(1週間の列挙)
                 col = webctrl.gets('td', webctrl.By.TAG_NAME, row)
                 for i in range(len(col)):
@@ -226,7 +220,7 @@ def get_cal(conf):
 
 # TODO
 def set_cal(conf, merge):
-    return 
+    return 0
 
 ################################################################################
 # コピーモードの予定取得
@@ -244,7 +238,7 @@ def get_one_cal(conf):
 
     # ユーザが特定の予定ページを押すのを待つ
     print('抽出する予定を選択してください')
-    while not webctrl.url().startswith(URL_DETAIL):
+    while not webctrl.url().startswith(URL_DETAIL % conf['serv']):
         time.sleep(WAIT_SEARCH) # グループ変更後の更新待ち
 
     # 参加者が縮小表示されている可能性があるため、フル表示しておく
@@ -261,11 +255,11 @@ def get_one_cal(conf):
     person  = re.search(r'参加者\s*(.*)', text).group(1)
 
     # 扱いやすい構造に変換
-    dt = re.split('[ 　年月日]+', dt)
+    dt = re.split('[ 　年月日火水木金土]+', dt)
     roomOK = tuple(conf['group'][0]['target'])
-    room = list(map(lambda x: x.split()[0], filter(lambda a: a.startswith(roomOK), room.split(' '))))
+    room = list(filter(lambda a: a.startswith(roomOK), room.split(' ')))
     personOK = tuple(conf['group'][1]['target'])
-    person = list(map(lambda x: x.split()[0], filter(lambda a: a.startswith(personOK), person.split(' '))))
+    person = list(filter(lambda a: a.startswith(personOK), person.split(' ')))
 
     # 日付パターン
     # 2025 年 1 月 23 日 （木） （終日）
@@ -274,8 +268,8 @@ def get_one_cal(conf):
     if len(dt) < 13: # 終日
         tbgn, tend = conf['alltime'].split('-')
     else:
-        tbgn = dt[4] + ':' + dt[6]
-        tend = dt[9] + ':' + dt[11]
+        tbgn = dt[ 5] + ':' + dt[ 7]
+        tend = dt[10] + ':' + dt[12]
 
     ret = []
     for summ in person + room:

@@ -5,6 +5,8 @@
 #
 # 2025.03.15 rinos4u	new
 # 2025.03.30 rinos4u	予定の追加ボタンが押せないケースがありリトライ追加(少し改善)
+# 2025.04.20
+#  rinos4u	予定の追加ボタンが押せないケースがあり更に改善(execute_scriptでクリック)
 
 ################################################################################
 # import
@@ -254,13 +256,16 @@ def set_cal(conf, merge):
             # 事務所確認
             ar_checkgroup(group)
 
-            # 空いている予定をクリック
+            # ボタンが押しやすいように日単位に変更 → 変わらず、削除
+            # webctrl.fclick(webctrl.search('label', '日', webctrl.By.TAG_NAME))
+
             # →schldCellが複数あり、場所によりエラーになる。例外なくなるまで叩く
+            # 空いている予定をクリック
             for elm in webctrl.finds('schldCell', webctrl.By.CLASS_NAME):
                 try:
                     webctrl.fmove(elm, 0)
                     time.sleep(WAIT_AFTER) # クリックできる場所まで移動するのを待つ
-                    webctrl.fclick(elm, 0)
+                    webctrl.driver().execute_script('arguments[0].click();', elm)
                     break # 例外が発生しなかったら継続
                 except:
                     pass
@@ -296,9 +301,12 @@ def set_cal(conf, merge):
 
             # メニューをaddmenuにセットして詳細画面を開く
             webctrl.set('bookingMenuBalloonSelectMenu', conf['addmenu'])
+            webctrl.selindex('startHour',   0, webctrl.By.CLASS_NAME)
+            webctrl.selindex('startMinute', 0, webctrl.By.CLASS_NAME)
             time.sleep(WAIT_SET) # 入力確認も兼ねて、表示したまま少し待つ
             webctrl.click('bookingRegist')
             time.sleep(WAIT_SET) # 入力確認も兼ねて、表示したまま少し待つ
+
 
             # 開始時間を設定 (2025/01/23 12:34)
             webctrl.set('rmStartDate',       tbgn[  :10])
