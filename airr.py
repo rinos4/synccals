@@ -70,6 +70,7 @@ def ar_checkgroup(group):
     if group not in menu[1].text:
         g_logger.debug('change:group from %s' % (menu[1].text))
         menu[1].click()
+        time.sleep(WAIT_AFTER)
         webctrl.click('cmn-hdr-account-menu-link', webctrl.By.CLASS_NAME)
         time.sleep(WAIT_AFTER)
         webctrl.wait()
