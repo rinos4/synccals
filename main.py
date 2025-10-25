@@ -16,6 +16,7 @@ import yaml
 import webctrl
 from logconf import g_logger
 import sys
+import re
 
 ################################################################################
 # const
@@ -28,6 +29,10 @@ CONF_FILE = 'config.yaml'
 MERGE_FILE = 'log/mid_merge.yaml'
 
 DESC_MAX = 25 # 表示目的のみ。よく使う画面幅に応じて設定。
+
+# ChromeDriverのバージョンエラー検出
+CD_ERR = re.compile(r'.*Chrome version (\d*)\n.*Current browser version is ([\d.]*)')
+CD_URL = 'https://googlechromelabs.github.io/chrome-for-testing/'
 
 ################################################################################
 # globals
@@ -49,9 +54,12 @@ def get_cals(confs):
         mod = importlib.import_module(conf['file'])
         try:
             dat = mod.get_cal(conf)
-        except Exception:
-            #g_logger.exception('GETプラグイン例外(%s)' % conf['name'])
-            g_logger.debug('%s - get_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+        except Exception as e:
+            g_logger.debug('%s - get_cal' % conf['name'], exc_info=True) #ダンプはログファイルのみに出す
+            cderr = CD_ERR.match(str(e))
+            if cderr:
+                g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
+                g_logger.info(CD_URL)
             g_logger.info('GETプラグインの例外により、プログラムを中断します')
             exit(101)
 
@@ -67,9 +75,12 @@ def set_cals(confs, merge):
         mod = importlib.import_module(conf['file'])
         try:
             ret += mod.set_cal(conf, merge)
-        except Exception:
-            #g_logger.exception('SETプラグイン例外(%s)' % conf['name'])
+        except Exception as e:
             g_logger.debug('%s - set_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+            cderr = CD_ERR.match(str(e))
+            if cderr:
+                g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
+                g_logger.info(CD_URL)
             g_logger.info('SETプラグインの例外により、プログラムを中断します')
             exit(102)
     return ret
