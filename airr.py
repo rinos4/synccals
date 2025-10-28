@@ -198,9 +198,24 @@ def get_cal(conf):
             # 更新を待って次ページの解析
             time.sleep(WAIT_SEARCH)
 
-        # グループごとに取得した件数を表示しておく
-        g_logger.info('arr:%-4s=%d件' % (group, len(ret) - pre))
-        pre = len(ret)
+        # 
+        cnt = len(ret) - pre
+        if cnt:
+            # グループごとに取得した件数を表示しておく
+            g_logger.info('arr:%-4s=%d件' % (group, cnt))
+            pre = len(ret)
+        elif conf['checkgroupzero'] == 0:
+            g_logger.info('arr:%sのデータがありません(継続)' % group)
+        elif conf['checkgroupzero'] == 1:
+            g_logger.info('arr:%sのデータが無かったため、処理を停止します' % group)
+            exit(301)
+        else:
+            cont = input('arr:%sのデータが0件です。処理を継続しますか？(y/n):' % group)
+            if cont != 'y' and cont != 'Y':
+                g_logger.info('arr:%sのデータが0件のため、処理が停止されました' % group)
+                exit(302)
+            g_logger.info('arr:%sのデータが0件ですが、処理は継続されました' % group)
+
 
     # 開放
     if not keep:

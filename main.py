@@ -63,8 +63,21 @@ def get_cals(confs):
             g_logger.info('GETプラグインの例外により、プログラムを中断します')
             exit(101)
 
-        g_logger.info('%sから%d件取得しました' % (conf['name'], len(dat)))
-        ret += dat
+        if len(dat):
+            g_logger.info('%sから%d件取得しました' % (conf['name'], len(dat)))
+            ret += dat
+        elif conf['checkzero'] == 0:
+            g_logger.info('%sのデータがありません(継続)' % conf['name'])
+        elif conf['checkzero'] == 1:
+            g_logger.info('%sのデータが無かったため、処理を停止します' % conf['name'])
+            exit(201)
+        else:
+            cont = input('%sのデータが0件です。処理を継続しますか？(y/n):' % conf['name'])
+            if cont != 'y' and cont != 'Y':
+                g_logger.info('%sのデータが0件のため、処理が停止されました' % conf['name'])
+                exit(202)
+            g_logger.info('%sのデータが0件ですが、処理は継続されました' % conf['name'])
+
     return ret
 
 # 同期した差分を各カレンダに設定
@@ -123,7 +136,7 @@ def DoSync(confs):
     if confs['skipget']:
         # 前回保存したデータを読み込んで進む 
         g_logger.info('top:load old merge file')
-        with open(MERGE_FILE, mode='r', encoding='utf-8')as f:
+        with open(MERGE_FILE, mode='r', encoding='utf-8') as f:
             merge = yaml.safe_load(f)
     else:
         # カレンダーにアクセスして情報を抽出
@@ -132,7 +145,7 @@ def DoSync(confs):
         g_logger.debug('top:get %d items', len(merge))
 
         # 中間ファイルの保存(skipget=1の場合に利用 & デバッグ用)
-        with open(MERGE_FILE, mode='w', encoding='utf-8')as f:
+        with open(MERGE_FILE, mode='w', encoding='utf-8') as f:
             yaml.safe_dump(merge, f, allow_unicode=True)
 
     # カレンダーの読み込み数を表示して、継続してよいか確認
