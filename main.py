@@ -232,6 +232,11 @@ if __name__ == '__main__':
     # ブラウザ常駐設定ならメインでブラウザを開いておく (終了まで使いまわす)
     if confs['keepdriver']:
         webctrl.init(confs['devscale'])
+        webctrl.init(
+            scale=confs.get('devscale', '1.0'),
+            chrome_exe=confs.get('chrome_exe', webctrl.CHROME_EXE_PATH),
+            driver_path=confs.get('driver_path', webctrl.CHROME_DRIVER_PATH)
+        )
 
     # 引数に応じてモードを切り替え
     if len(sys.argv) < 2:

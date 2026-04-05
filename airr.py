@@ -5,8 +5,8 @@
 #
 # 2025.03.15 rinos4u	new
 # 2025.03.30 rinos4u	予定の追加ボタンが押せないケースがありリトライ追加(少し改善)
-# 2025.04.20
-#  rinos4u	予定の追加ボタンが押せないケースがあり更に改善(execute_scriptでクリック)
+# 2025.04.20 rinos4u	予定の追加ボタンが押せないケースがあり更に改善(execute_scriptでクリック)
+# 2026.04.05 rinos4u	検索でヒットした数と同じ数ダウンロードできない場合にリトライする
 
 ################################################################################
 # import
@@ -91,6 +91,95 @@ def ar_checkgroup(group):
 # Plugin API
 ################################################################################
 # 予定取得
+def get_cal_searchlist(conf, group):
+    ret = []
+    old = set() # 追加済みセット
+    # 予定検索ボタン
+    #webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
+    # 予定検索ページを開く
+    webctrl.jump(URL_SEARCH)
+    time.sleep(WAIT_AFTER)
+
+    # 開始日(現在)～終了日(range加算)を設定
+    today = datetime.now()
+    daymin = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    daymax = daymin + timedelta(days=conf['range'] - 1)
+    g_logger.debug('arr:get %s to %s' % (daymin, daymax))
+    webctrl.set('bookingFromDt', daymin.strftime('%Y/%m/%d'))
+    webctrl.set('bookingToDt',   daymax.strftime('%Y/%m/%d'))
+
+    # 予約ステータス指定(キャンセル状態を除く3項目をON)
+    for i in range(3):
+        webctrl.click('bookingStatusCdList%d' % i) 
+
+    # 検索実行
+    webctrl.click('btn-search', webctrl.By.CLASS_NAME)
+    time.sleep(WAIT_SEARCH)
+
+    # 「該当する予約がありません」の場合はスキップ
+    if 'ありません' in webctrl.get('dialogueMessage'):
+        g_logger.info('arr:no data')
+        webctrl.click('closeErrDialogue')
+        return 0, ret
+
+    # 全件数totalnumを取得 (例: '全299件中 1〜50件')
+    resultNumTxt = webctrl.get('resultNumTxt', webctrl.By.CLASS_NAME)
+    totalnum = int(resultNumTxt[1:resultNumTxt.find('件')])
+    g_logger.debug('arr:%d件のアイテムがヒットしました' % (totalnum))
+    
+    # ページを辿りながら全アイテムを取得(totalnumと同じになるはず)
+    while True:
+        # 抽出した予定をオブジェクトに格納
+        bookary = webctrl.get('bookingSearchList').split('\n')
+        for i in range(0, len(bookary) - (SEARCH_COLUMN - 1), SEARCH_COLUMN):
+            # bookary[i + 0]: 予約番号
+            # bookary[i + 2]: 予約時間
+            # bookary[i + 3]: 名前 → 同期ツールではここに予定の詳細(desc)を格納
+            #                 全角のみだが、なぜか半角スペースが入る事がある(名前が空のとき?)
+            # bookary[i + 5]: 予約メニュー名 (自動入力の場合はconf['automenu']が入っている)
+            # bookary[i + 6]: 「、」区切りのリソース(部屋、人)。リソース名順でソートされている?
+
+            # 開始/終了日時の抽出
+            dt = bookary[i + 2].split(' ')
+            dbgn = dt[2][:10]
+            dend = dt[2][:10] #デフォルトは同日        (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '13:00～15:00'])
+            tm = dt[3].split('～')
+            if len(dt) > 4: # 日マタギの場合は特殊形式 (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '19:00～2025/02/23(日)', '00:00'])
+                dend = tm[1][:10]
+                tm[1] = dt[4]
+
+            # リソース分割
+            room, person = bookary[i + 6].split('、') # 仮でroom/personに入れる
+            if room not in conf['roomres']:
+                room, person = person, room # 逆なら反転しておく
+
+            # 登録オブジェクト作成
+            book = {
+                'ctyp': CAL_TYPE,
+                'tbgn': datetime.strptime(dbgn + ' ' + tm[0], '%Y/%m/%d %H:%M'),
+                'tend': datetime.strptime(dend + ' ' + tm[1], '%Y/%m/%d %H:%M'),
+                'summ': group + '@' + room + '@' + person + '@' + bookary[i + 5] + '@' + bookary[i],
+                'desc': bookary[i + 3].replace(' ', '') # 半角スペースが入ることがあるので削除しておく
+            }
+
+            # 念のため同一の予定が無ければ追加
+            sbook = str(book) # 文字列化したオブジェクトで同一チェック
+            if sbook not in old:
+                old.add(sbook)
+                ret.append(book)
+                g_logger.debug('arr:add %s' % (sbook))
+            else:
+                g_logger.warning('arr:多重登録 %s' % (sbook)) # 多重登録が見つかったら警告しておく
+                totalnum -= 1 # カウント上も外しておく
+        
+        # 次ページ処理
+        if not webctrl.exclick('icnNext', webctrl.By.CLASS_NAME):
+            break # 次ページが押せなければ終了
+
+        # 更新を待って次ページの解析
+        time.sleep(WAIT_SEARCH)
+    return totalnum, ret
+
 def get_cal(conf):
     keep = webctrl.driver()
     if not keep:
@@ -111,99 +200,56 @@ def get_cal(conf):
         webctrl.click('storeList__list__innerBox__name', webctrl.By.CLASS_NAME)
 
     # 応答値格納用
-    old = set() # 追加済みセット
+    #old = set() # 追加済みセット （→グループ別でチェックするためコメントアウト）
     ret = []    # 関数から戻す配列
-    pre = 0
 
     for group in conf['group']:
         # 事務所確認
         g_logger.debug('arr:group %s' % (group))
         ar_checkgroup(group)
-        
-        # 予定検索ボタン
-        #webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
-        # 予定検索ページを開く
-        webctrl.jump(URL_SEARCH)
-        time.sleep(WAIT_AFTER)
 
-        # 開始日(現在)～終了日(range加算)を設定
-        today = datetime.now()
-        daymin = today.replace(hour=0, minute=0, second=0, microsecond=0)
-        daymax = daymin + timedelta(days=conf['range'] - 1)
-        g_logger.debug('arr:get %s to %s' % (daymin, daymax))
-        webctrl.set('bookingFromDt', daymin.strftime('%Y/%m/%d'))
-        webctrl.set('bookingToDt',   daymax.strftime('%Y/%m/%d'))
-
-        # 予約ステータス指定(キャンセル状態を除く3項目をON)
-        for i in range(3):
-            webctrl.click('bookingStatusCdList%d' % i) 
-
-        # 検索実行
-        webctrl.click('btn-search', webctrl.By.CLASS_NAME)
-        time.sleep(WAIT_SEARCH)
-
-        # 「該当する予約がありません」の場合はスキップ
-        if 'ありません' in webctrl.get('dialogueMessage'):
-            g_logger.info('arr:no data')
-            webctrl.click('closeErrDialogue')
-            continue
-
+        # 正しくリスト取得ができない場合がある。リトライ回数を設定
+        diffretry = conf['diffretry']
         while True:
-            # 抽出した予定をオブジェクトに格納
-            bookary = webctrl.get('bookingSearchList').split('\n')
-            for i in range(0, len(bookary) - (SEARCH_COLUMN - 1), SEARCH_COLUMN):
-                # bookary[i + 0]: 予約番号
-                # bookary[i + 2]: 予約時間
-                # bookary[i + 3]: 名前 → 同期ツールではここに予定の詳細(desc)を格納
-                #                 全角のみだが、なぜか半角スペースが入る事がある(名前が空のとき?)
-                # bookary[i + 5]: 予約メニュー名 (自動入力の場合はconf['automenu']が入っている)
-                # bookary[i + 6]: 「、」区切りのリソース(部屋、人)。リソース名順でソートされている?
+            totalnum, slist = get_cal_searchlist(conf, group)
+            cnt = len(slist)
+            if totalnum <= cnt: #多い場合も許容(別ユーザが同タイミングで追加する可能性)
+                break
 
-                # 開始/終了日時の抽出
-                dt = bookary[i + 2].split(' ')
-                dbgn = dt[2][:10]
-                dend = dt[2][:10] #デフォルトは同日        (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '13:00～15:00'])
-                tm = dt[3].split('～')
-                if len(dt) > 4: # 日マタギの場合は特殊形式 (例：['2025/01/11(土)', '12:34', '2025/02/22(土)', '19:00～2025/02/23(日)', '00:00'])
-                    dend = tm[1][:10]
-                    tm[1] = dt[4]
+            # ヒット件数と取得できた件数が異なる(old重複は除く)
+            g_logger.info('arr:%-4s=%d件中%d件のみダウンロード(リトライ残%d回)' % (group, totalnum, cnt, diffretry))
 
-                # リソース分割
-                room, person = bookary[i + 6].split('、') # 仮でroom/personに入れる
-                if room not in conf['roomres']:
-                    room, person = person, room # 逆なら反転しておく
-
-                # 登録オブジェクト作成
-                book = {
-                    'ctyp': CAL_TYPE,
-                    'tbgn': datetime.strptime(dbgn + ' ' + tm[0], '%Y/%m/%d %H:%M'),
-                    'tend': datetime.strptime(dend + ' ' + tm[1], '%Y/%m/%d %H:%M'),
-                    'summ': group + '@' + room + '@' + person + '@' + bookary[i + 5] + '@' + bookary[i],
-                    'desc': bookary[i + 3].replace(' ', '') # 半角スペースが入ることがあるので削除しておく
-                }
-
-                # 念のため同一の予定が無ければ追加
-                sbook = str(book) # 文字列化したオブジェクトで同一チェック
-                if sbook not in old:
-                    old.add(sbook)
-                    ret.append(book)
-                    g_logger.debug('arr:add %s' % (sbook))
-                else:
-                    g_logger.warning('arr:多重登録 %s' % (sbook)) # 多重登録が見つかったら警告しておく
+            if diffretry < 0: # リトライが負の場合はリトライチェックをしない
+                break
+            if diffretry == 0:
+                g_logger.info('arr:%s:予定(%d件)の全データを取得できなかったため、処理を停止します' % (group, totalnum))
+                exit(303)
             
-            # 次ページ処理
-            if not webctrl.exclick('icnNext', webctrl.By.CLASS_NAME):
-                break # 次ページが押せなければ終了
+            # リトライ回数だけ繰り返す
+            diffretry -= 1
+            if diffretry % 2:
+                # 残り奇数回のリトライは、keep設定を無視して強制的にChromeを再立ち上げする
+                webctrl.deinit()
+                time.sleep(WAIT_AFTER)
+                webctrl.init(conf['devscale'])
 
-            # 更新を待って次ページの解析
-            time.sleep(WAIT_SEARCH)
+                # 予定検索ページを開く
+                webctrl.jump(URL_SEARCH)
 
-        # 
-        cnt = len(ret) - pre
+                # ユーザ/パスワード画面に遷移した？
+                if 'login' in webctrl.url():
+                    ar_login(conf)
+
+                # 店舗選択画面なら先頭を叩いておく
+                selst = webctrl.gets('h1', webctrl.By.TAG_NAME)
+                if selst and '選択' in selst[0]:
+                    g_logger.debug('arr:select top page1 %s' % (selst[0]))
+                    webctrl.click('storeList__list__innerBox__name', webctrl.By.CLASS_NAME)
+
         if cnt:
             # グループごとに取得した件数を表示しておく
-            g_logger.info('arr:%-4s=%d件' % (group, cnt))
-            pre = len(ret)
+            g_logger.info('arr:%-4s=%d件/%d件' % (group, cnt, totalnum))
+            ret.extend(slist)
         elif conf['checkgroupzero'] == 0:
             g_logger.info('arr:%sのデータがありません(継続)' % group)
         elif conf['checkgroupzero'] == 1:
@@ -215,7 +261,6 @@ def get_cal(conf):
                 g_logger.info('arr:%sのデータが0件のため、処理が停止されました' % group)
                 exit(302)
             g_logger.info('arr:%sのデータが0件ですが、処理は継続されました' % group)
-
 
     # 開放
     if not keep:

@@ -180,3 +180,4 @@ log/*
 *.bat
 *.bak
 test.*
+driver/chromedriver_*.exe

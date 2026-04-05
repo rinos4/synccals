@@ -4,6 +4,7 @@
 # Copyright (c) 2025 rinos4u, released under the MIT open source license.
 #
 # 2025.03.15 rinos4u	new
+# 2026.04.05 rinos4u	Add CHROME_EXE_PATH for test version
 
 ################################################################################
 # import
@@ -17,15 +18,20 @@ from selenium.webdriver.chrome.options import Options           # type: ignore
 from selenium.webdriver.common.by import By                     # type: ignore
 from selenium.webdriver.common.action_chains import ActionChains# type: ignore
 
+from pathlib import Path
 import time
 from logconf import g_logger
 
 ################################################################################
 # const
 ################################################################################
-CHROME_PROFILE_PATH = r'C:\work\dev\synccals\chrome_prof'
+#CHROME_PROFILE_PATH = r'C:\work\dev\synccals\chrome_prof'
+#CHROME_PROFILE_PATH = r'chrome_prof'
+CHROME_PROFILE_PATH = str(Path.cwd() / 'chrome_prof')
 CHROME_PROFILE_NAME = 'Default'
 CHROME_DRIVER_PATH  = 'driver/chromedriver.exe'
+CHROME_EXE_PATH     = ''
+#CHROME_EXE_PATH     = r'C:\work\dev\chrome-win64\chrome.exe' #テストバージョンのChromeを使用する場合
 
 WAIT_CLICK  = 0.2
 WAIT_AFTER  = 0.5
@@ -42,7 +48,7 @@ g_driver = None
 # util funcs
 ################################################################################
 # ドライバの初期化
-def init(scale = '1.0'):
+def init(scale='1.0', chrome_exe=CHROME_EXE_PATH, driver_path=CHROME_DRIVER_PATH):
     global g_driver
 
     # 初期化済みなら省略
@@ -52,6 +58,8 @@ def init(scale = '1.0'):
 
     # 新規作成
     opt = Options()
+    if chrome_exe:
+        opt.binary_location = chrome_exe
     opt.add_argument(f'--user-data-dir={CHROME_PROFILE_PATH}')
     opt.add_argument(f"--profile-directory={CHROME_PROFILE_NAME}")
     opt.add_argument("--no-first-run")
@@ -59,7 +67,7 @@ def init(scale = '1.0'):
     opt.add_argument('--no-sandbox')
     opt.add_argument('--force-device-scale-factor=' + scale)
     opt.add_experimental_option("excludeSwitches", ['enable-automation', 'enable-logging']) # seleniumのメッセージを消す
-    g_driver = webdriver.Chrome(service=Service(executable_path=CHROME_DRIVER_PATH), options=opt)
+    g_driver = webdriver.Chrome(service=Service(executable_path=driver_path), options=opt)
     g_logger.debug('webctrl::init done')
     #g_driver.execute_script("document.body.style.zoom='100%'")
     
