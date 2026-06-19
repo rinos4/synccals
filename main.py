@@ -7,6 +7,7 @@
 # 2025.03.23 rinos4u	一致チェックにdescを含めるか設定できるように変更
 # 2025.03.30 rinos4u	処理継続をinputで確認できるよう機能を追加
 # 2025.04.06 qqe		サイボウズからのコピーモードを追加
+# 2026.04.26 rinos4u	カレンダ取得/設定例外のリトライ追加
 
 ################################################################################
 # import
@@ -21,7 +22,7 @@ import re
 ################################################################################
 # const
 ################################################################################
-APP_VER = '1.0.3'
+APP_VER = '1.0.4'
 # カレンダー設定ファイル
 CONF_FILE = 'config.yaml'
 
@@ -52,17 +53,27 @@ def get_cals(confs):
     for conf in confs['cals']:
         g_logger.debug('top:import plugin %s for %s (GET)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
-        try:
-            dat = mod.get_cal(conf)
-        except Exception as e:
-            g_logger.debug('%s - get_cal' % conf['name'], exc_info=True) #ダンプはログファイルのみに出す
-            cderr = CD_ERR.match(str(e))
-            if cderr:
-                g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
-                g_logger.info(CD_URL)
-            g_logger.info('GETプラグインの例外により、プログラムを中断します')
-            exit(101)
 
+        # リトライだけ取得を繰り返す
+        retry = conf.get('getretry', 0)
+        while True:
+            try:
+                dat = mod.get_cal(conf)
+                break
+            except Exception as e:
+                g_logger.debug('%s - get_cal' % conf['name'], exc_info=True) #ダンプはログファイルのみに出す
+                cderr = CD_ERR.match(str(e))
+                if cderr:
+                    g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
+                    g_logger.info(CD_URL)
+                    exit(101)
+
+            retry -= 1
+            if retry < 0:
+                g_logger.info('GETプラグインの例外により、プログラムを中断します')
+                exit(102)
+            g_logger.info('GETプラグインの例外により取得をリトライします(残:%d回)' % retry)
+    
         if len(dat):
             g_logger.info('%sから%d件取得しました' % (conf['name'], len(dat)))
             ret += dat
@@ -86,16 +97,27 @@ def set_cals(confs, merge):
     for conf in confs['cals']:
         g_logger.debug('top:import plugin %s for %s (SET)' % (conf['file'], conf['name']))
         mod = importlib.import_module(conf['file'])
-        try:
-            ret += mod.set_cal(conf, merge)
-        except Exception as e:
-            g_logger.debug('%s - set_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
-            cderr = CD_ERR.match(str(e))
-            if cderr:
-                g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
-                g_logger.info(CD_URL)
-            g_logger.info('SETプラグインの例外により、プログラムを中断します')
-            exit(102)
+
+        # リトライだけ取得を繰り返す
+        retry = conf.get('setretry', 0)
+        while True:
+            try:
+                ret += mod.set_cal(conf, merge)
+                break
+            except Exception as e:
+                g_logger.debug('%s - set_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
+                cderr = CD_ERR.match(str(e))
+                if cderr:
+                    g_logger.info('ChromeDriverをバージョンアップしてください (%s → %s)' % cderr.groups())
+                    g_logger.info(CD_URL)
+                    exit(103)
+
+            retry -= 1
+            if retry < 0:
+                g_logger.info('SETプラグインの例外により、プログラムを中断します')
+                exit(104)
+            g_logger.info('SETプラグインの例外により取得をリトライします(残:%d回)' % retry)
+
     return ret
 
 # カレンダの同期
@@ -109,7 +131,7 @@ def sync_cals(confs, merge):
             #g_logger.exception('SYNCプラグイン例外(%s)' % conf['name'])
             g_logger.debug('%s - sync_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
             g_logger.info('SYNCプラグインの例外により、プログラムを中断します')
-            exit(103)
+            exit(301)
     return merge
 
 # カレンダから一つの予定を取り出す
@@ -123,7 +145,7 @@ def get_one_cals(confs):
         except Exception:
             g_logger.debug('%s - get_one_cal' % conf['name'],exc_info=True) #ダンプはログファイルのみに出す
             g_logger.info('GET-ONEプラグインの例外により、プログラムを中断します')
-            exit(104)
+            exit(401)
 
         g_logger.info('%sから%d件取得しました' % (conf['name'], len(dat)))
         ret += dat

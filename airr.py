@@ -7,6 +7,7 @@
 # 2025.03.30 rinos4u	予定の追加ボタンが押せないケースがありリトライ追加(少し改善)
 # 2025.04.20 rinos4u	予定の追加ボタンが押せないケースがあり更に改善(execute_scriptでクリック)
 # 2026.04.05 rinos4u	検索でヒットした数と同じ数ダウンロードできない場合にリトライする
+# 2026.04.26 rinos4u	予定件数が取得できない場合のリトライ追加
 
 ################################################################################
 # import
@@ -61,6 +62,7 @@ def ar_login(conf):
 
 # 事務所が違うなら変更
 def ar_checkgroup(group):
+    time.sleep(WAIT_AFTER)
     # 事務所情報を取得
     menu = webctrl.finds('cmn-hdr-btn-text', webctrl.By.CLASS_NAME)
     if len(menu) < 2:
@@ -92,8 +94,6 @@ def ar_checkgroup(group):
 ################################################################################
 # 予定取得
 def get_cal_searchlist(conf, group):
-    ret = []
-    old = set() # 追加済みセット
     # 予定検索ボタン
     #webctrl.click('h-ico-search', webctrl.By.CLASS_NAME)
     # 予定検索ページを開く
@@ -114,20 +114,27 @@ def get_cal_searchlist(conf, group):
 
     # 検索実行
     webctrl.click('btn-search', webctrl.By.CLASS_NAME)
-    time.sleep(WAIT_SEARCH)
+    time.sleep(WAIT_SEARCH * 3) # 時間がかかる事が多いので、特にウェイトを大きくしておく
 
     # 「該当する予約がありません」の場合はスキップ
     if 'ありません' in webctrl.get('dialogueMessage'):
         g_logger.info('arr:no data')
         webctrl.click('closeErrDialogue')
-        return 0, ret
+        return 0, []
 
     # 全件数totalnumを取得 (例: '全299件中 1〜50件')
-    resultNumTxt = webctrl.get('resultNumTxt', webctrl.By.CLASS_NAME)
-    totalnum = int(resultNumTxt[1:resultNumTxt.find('件')])
+    try:
+        resultNumTxt = webctrl.get('resultNumTxt', webctrl.By.CLASS_NAME)
+        totalnum = int(resultNumTxt[1:resultNumTxt.find('件')])
+    except:
+        g_logger.info('arr:予定リストの件数が取得できませんでした')
+        return 1, []
+
     g_logger.debug('arr:%d件のアイテムがヒットしました' % (totalnum))
     
     # ページを辿りながら全アイテムを取得(totalnumと同じになるはず)
+    ret = []
+    old = set() # 追加済みセット
     while True:
         # 抽出した予定をオブジェクトに格納
         bookary = webctrl.get('bookingSearchList').split('\n')
@@ -204,13 +211,14 @@ def get_cal(conf):
     ret = []    # 関数から戻す配列
 
     for group in conf['group']:
-        # 事務所確認
-        g_logger.debug('arr:group %s' % (group))
-        ar_checkgroup(group)
-
         # 正しくリスト取得ができない場合がある。リトライ回数を設定
         diffretry = conf['diffretry']
         while True:
+            # 事務所確認
+            g_logger.debug('arr:group %s' % (group))
+            ar_checkgroup(group)
+
+            # 対象グループの予定数と予定リストを取得
             totalnum, slist = get_cal_searchlist(conf, group)
             cnt = len(slist)
             if totalnum <= cnt: #多い場合も許容(別ユーザが同タイミングで追加する可能性)
